@@ -2,8 +2,8 @@
 
 ### 1. Clone Repository
 ```bash
-!git clone https://github.com/your-username/visual-genome-caption.git
-%cd visual-genome-caption
+!git clone https://github.com/HaianCao/ImageCaptioningE2E.git
+%cd ImageCaptioningE2E
 ```
 
 ### 2. Run Complete Pipeline Notebook
