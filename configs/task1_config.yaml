@@ -1,0 +1,65 @@
+# ============================================================
+# Task 1 Configuration: Object & Attribute Classification
+# ============================================================
+
+task: "task1"
+
+# ── Visual Backbone ────────────────────────────────────────
+# Options: "resnet50", "resnet101", "efficientnet_b3",
+#          "efficientnet_b5", "vit_base_16", "vit_large_16"
+backbone:
+  name: "resnet50"
+  pretrained: true
+  freeze_backbone: false      # true = feature extraction only
+  freeze_epochs: 0            # Unfreeze after N epochs (0 = never freeze)
+  feature_dim: 2048           # Output dim (resnet50: 2048, vit_base: 768)
+
+# ── Dataset ────────────────────────────────────────────────
+dataset:
+  processed_dir: "data/processed/task1"
+  feature_cache_dir: "data/features/task1"
+  use_feature_cache: true    # Load pre-extracted features
+
+# ── Label Space ────────────────────────────────────────────
+labels:
+  object_vocab_file: "data/processed/task1/object_vocab.json"
+  attribute_vocab_file: "data/processed/task1/attribute_vocab.json"
+  max_objects: 300            # Top-N most frequent object classes
+  max_attributes: 200         # Top-N most frequent attribute labels
+
+# ── Model Architecture ─────────────────────────────────────
+model:
+  # Object head
+  object_hidden_dim: 512
+  object_dropout: 0.3
+
+  # Attribute head (multi-label)
+  attribute_hidden_dim: 512
+  attribute_dropout: 0.3
+
+# ── Loss Weights ───────────────────────────────────────────
+loss:
+  object_weight: 1.0          # Weight for object classification loss
+  attribute_weight: 1.0       # Weight for attribute classification loss
+  attribute_pos_weight: 5.0   # Positive class weight in BCE (handle imbalance)
+
+# ── Training Overrides ─────────────────────────────────────
+training:
+  batch_size: 128
+  max_epochs: 40
+  lr: 5.0e-4
+
+# ── Data Augmentation ──────────────────────────────────────
+augmentation:
+  random_horizontal_flip: 0.5
+  color_jitter:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+  random_resized_crop: false   # Keep ROI aspect ratio
+
+# ── Evaluation ─────────────────────────────────────────────
+eval:
+  object_top_k: [1, 3, 5]
+  attribute_threshold: 0.5    # Sigmoid threshold for multi-label

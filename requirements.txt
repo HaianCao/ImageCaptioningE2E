@@ -1,0 +1,44 @@
+# Core Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+timm>=0.9.0                  # ViT, EfficientNet backbones
+
+# HuggingFace ecosystem
+datasets>=2.14.0
+transformers>=4.35.0         # GPT-2, T5 for caption generation
+huggingface_hub>=0.17.0
+accelerate>=0.24.0
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+Pillow>=10.0.0
+opencv-python>=4.8.0
+scikit-learn>=1.3.0
+h5py>=3.9.0                  # Feature caching
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# NLP metrics (caption evaluation)
+nltk>=3.8.1
+rouge-score>=0.1.2
+pycocoevalcap>=1.2           # BLEU, CIDEr, METEOR, ROUGE
+
+# Config management
+PyYAML>=6.0
+omegaconf>=2.3.0
+
+# Logging & progress
+tqdm>=4.65.0
+tensorboard>=2.13.0
+wandb>=0.15.0                # Optional: experiment tracking
+
+# Utilities
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Jupyter
+jupyter>=1.0.0
+ipywidgets>=8.0.0

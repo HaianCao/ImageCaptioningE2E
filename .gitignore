@@ -1,0 +1,53 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Data directories (too large for git)
+data/raw/
+data/processed/
+features/
+
+# Model checkpoints (too large for git)
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.h5
+
+# Logs
+logs/
+runs/
+*.log
+wandb/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Environment files with secrets
+.env.local
+secrets.yaml

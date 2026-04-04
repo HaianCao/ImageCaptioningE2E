@@ -1,0 +1,61 @@
+# ============================================================
+# Global Configuration
+# ============================================================
+
+project_name: "visual-genome-caption"
+seed: 42
+device: "cpu"  # "cuda" or "cpu"
+
+# ── Paths ──────────────────────────────────────────────────
+paths:
+  data_dir: "data"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  feature_dir: "data/features"       # Cached feature files (.pt)
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+
+# ── HuggingFace Dataset ────────────────────────────────────
+dataset:
+  repo_id: "ranjaykrishna/visual_genome"
+  cache_dir: "data/raw/hf_cache"
+  image_dir: "data/raw/images"
+
+# ── Image Processing ───────────────────────────────────────
+image:
+  roi_size: 224          # Size to resize ROI crops
+  mean: [0.485, 0.456, 0.406]    # ImageNet mean
+  std: [0.229, 0.224, 0.225]     # ImageNet std
+
+# ── Data Split ─────────────────────────────────────────────
+split:
+  train: 0.70
+  val: 0.15
+  test: 0.15
+
+# ── General Training ───────────────────────────────────────
+training:
+  batch_size: 64
+  num_workers: 4
+  pin_memory: true
+  max_epochs: 30
+  early_stopping_patience: 5
+  gradient_clip_val: 1.0
+  log_every_n_steps: 50
+
+# ── Optimizer ──────────────────────────────────────────────
+optimizer:
+  name: "adamw"          # "adam", "adamw", "sgd"
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+
+# ── LR Scheduler ───────────────────────────────────────────
+scheduler:
+  name: "cosine"         # "cosine", "step", "plateau"
+  warmup_epochs: 2
+
+# ── Logging ────────────────────────────────────────────────
+logging:
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: "vg-caption"
