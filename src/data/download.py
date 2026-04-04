@@ -25,6 +25,42 @@ VG_URLS = {
     "image_data": "https://homes.cs.washington.edu/~ranjay/visualgenome/data/dataset/image_data.json.zip"
 }
 
+VG_JSON_FILENAMES = {
+    "objects": "objects.json",
+    "attributes": "attributes.json",
+    "relationships": "relationships.json",
+    "image_data": "image_data.json",
+}
+
+JSON_FILE_ALIASES = {
+    "objects.json": ["objects_v1_2.json"],
+    "relationships.json": ["relationships_v1_2.json"],
+    "attributes.json": [],
+    "image_data.json": [],
+}
+
+
+def _find_existing_json(raw_path: Path, filename: str) -> Optional[Path]:
+    """Find a canonical JSON file or one of its known aliases."""
+    for candidate_name in [filename, *JSON_FILE_ALIASES.get(filename, [])]:
+        candidate_path = raw_path / candidate_name
+        if candidate_path.exists():
+            return candidate_path
+    return None
+
+
+def _normalize_json_file(source_path: Path, canonical_name: str) -> Path:
+    """Rename an extracted JSON file to the canonical filename used downstream."""
+    canonical_path = source_path.parent / canonical_name
+    if source_path.name == canonical_name:
+        return source_path
+
+    if canonical_path.exists():
+        canonical_path.unlink()
+
+    source_path.rename(canonical_path)
+    return canonical_path
+
 
 def download_file(url: str, dest_path: str, chunk_size: int = 1048576) -> str:
     """
@@ -101,14 +137,15 @@ def download_and_extract_metadata(
         url = VG_URLS[dtype]
         zip_name = url.split('/')[-1]
         zip_path = raw_path / zip_name
-        
-        # Dự đoán tên file JSON sẽ được giải nén
-        json_name = zip_name.replace('.zip', '')
-        json_path = raw_path / json_name
-        
-        if json_path.exists():
-            print(f"[Skip] {json_name} đã tồn tại.")
-            results[dtype] = str(json_path)
+
+        canonical_name = VG_JSON_FILENAMES[dtype]
+        existing_path = _find_existing_json(raw_path, canonical_name)
+
+        if existing_path:
+            if existing_path.name != canonical_name:
+                existing_path = _normalize_json_file(existing_path, canonical_name)
+            print(f"[Skip] {canonical_name} đã tồn tại.")
+            results[dtype] = str(existing_path)
             continue
             
         print(f"\n--- Đang xử lý {dtype} ---")
@@ -119,7 +156,9 @@ def download_and_extract_metadata(
             # Giải nén
             extracted = unzip_file(str(zip_path), str(raw_path))
             if extracted:
-                results[dtype] = extracted[0] # Giả sử 1 zip chứa 1 json
+                extracted_path = Path(extracted[0])
+                normalized_path = _normalize_json_file(extracted_path, canonical_name)
+                results[dtype] = str(normalized_path)
             
             # Dọn dẹp
             if not keep_zip and zip_path.exists():
@@ -244,10 +283,15 @@ def verify_download(
     status = {}
     print("\n--- Kiểm tra dữ liệu RAW ---")
     for fname in expected_files:
-        fpath = raw_path / fname
-        status[fname] = fpath.exists()
-        icon = "✅" if fpath.exists() else "❌"
-        size = f"({fpath.stat().st_size / 1e6:.1f} MB)" if fpath.exists() else "(Thiếu file)"
-        print(f"  {icon}  {fname} {size}")
+        fpath = _find_existing_json(raw_path, fname)
+        status[fname] = fpath is not None
+        icon = "✅" if fpath else "❌"
+        if fpath:
+            size = f"({fpath.stat().st_size / 1e6:.1f} MB)"
+            display_name = fpath.name if fpath.name != fname else fname
+        else:
+            size = "(Thiếu file)"
+            display_name = fname
+        print(f"  {icon}  {display_name} {size}")
 
     return status

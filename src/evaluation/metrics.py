@@ -1,15 +1,14 @@
 """
 Evaluation metrics for Visual Genome tasks.
 
-Includes:
-- Classification metrics (accuracy, F1, mAP)
-- Caption evaluation (BLEU, CIDEr, METEOR)
+The training pipeline currently treats Task 1 and Task 2 as classification problems,
+so the primary metrics here are accuracy and F1.
 """
 
 import torch
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
-from sklearn.metrics import accuracy_score, f1_score, precision_recall_fscore_support
+from sklearn.metrics import accuracy_score, f1_score
 
 
 def compute_classification_metrics(
@@ -24,11 +23,11 @@ def compute_classification_metrics(
     Args:
         preds: Predicted labels (N,) or logits (N, C)
         targets: Ground truth labels (N,)
-        num_classes: Number of classes (for mAP)
-        average: Averaging method ('macro', 'micro', 'weighted')
+        num_classes: Kept for backward compatibility, ignored.
+        average: Averaging method for F1 ('macro', 'micro', 'weighted')
 
     Returns:
-        Dict with accuracy, precision, recall, f1, mAP
+        Dict with accuracy and F1
     """
     # Convert to numpy
     if isinstance(preds, torch.Tensor):
@@ -39,24 +38,10 @@ def compute_classification_metrics(
     if isinstance(targets, torch.Tensor):
         targets = targets.cpu().numpy()
 
-    # Basic metrics
-    accuracy = accuracy_score(targets, preds)
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        targets, preds, average=average, zero_division=0
-    )
-
-    metrics = {
-        'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1
+    return {
+        'accuracy': float(accuracy_score(targets, preds)),
+        'f1': float(f1_score(targets, preds, average=average, zero_division=0)),
     }
-
-    # Mean Average Precision if num_classes provided
-    if num_classes:
-        metrics['mAP'] = compute_mAP(preds, targets, num_classes)
-
-    return metrics
 
 
 def compute_mAP(
@@ -123,7 +108,8 @@ def compute_average_precision(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 def compute_multilabel_metrics(
     preds: torch.Tensor,
     targets: torch.Tensor,
-    threshold: float = 0.5
+    threshold: float = 0.5,
+    average: str = 'macro'
 ) -> Dict[str, float]:
     """
     Compute multi-label classification metrics.
@@ -132,42 +118,21 @@ def compute_multilabel_metrics(
         preds: Predicted logits (N, num_attributes)
         targets: Ground truth binary labels (N, num_attributes)
         threshold: Threshold for positive predictions
+        average: F1 averaging method ('macro', 'micro', 'weighted')
 
     Returns:
-        Dict with precision, recall, f1 per class and macro averages
+        Dict with accuracy and F1
     """
     # Convert to binary predictions
-    pred_binary = (preds.sigmoid() > threshold).float()
+    pred_binary = (preds.sigmoid() > threshold).int()
 
     # Convert to numpy
     pred_np = pred_binary.cpu().numpy()
-    target_np = targets.cpu().numpy()
-
-    # Per-class metrics
-    precision_per_class, recall_per_class, f1_per_class, _ = precision_recall_fscore_support(
-        target_np, pred_np, average=None, zero_division=0
-    )
-
-    # Macro averages
-    precision_macro, recall_macro, f1_macro, _ = precision_recall_fscore_support(
-        target_np, pred_np, average='macro', zero_division=0
-    )
-
-    # Micro averages
-    precision_micro, recall_micro, f1_micro, _ = precision_recall_fscore_support(
-        target_np, pred_np, average='micro', zero_division=0
-    )
+    target_np = targets.cpu().numpy().astype(int)
 
     return {
-        'precision_macro': precision_macro,
-        'recall_macro': recall_macro,
-        'f1_macro': f1_macro,
-        'precision_micro': precision_micro,
-        'recall_micro': recall_micro,
-        'f1_micro': f1_micro,
-        'precision_per_class': precision_per_class.tolist(),
-        'recall_per_class': recall_per_class.tolist(),
-        'f1_per_class': f1_per_class.tolist()
+        'accuracy': float(accuracy_score(target_np, pred_np)),
+        'f1': float(f1_score(target_np, pred_np, average=average, zero_division=0)),
     }
 
 
@@ -252,7 +217,6 @@ def compute_cider(predictions: List[str], references: List[List[str]]) -> float:
 # Update __all__ in __init__.py
 __all__ = [
     'compute_classification_metrics',
-    'compute_mAP',
     'compute_multilabel_metrics',
     'compute_caption_metrics'
 ]

@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List
 from .trainer import BaseTrainer
 from ..models.task2 import RelationClassifier
 from ..evaluation import compute_classification_metrics
+from ..utils import CheckpointManager
 
 
 class Task2Trainer(BaseTrainer):
@@ -27,9 +28,26 @@ class Task2Trainer(BaseTrainer):
         train_loader: DataLoader,
         val_loader: DataLoader,
         optimizer: torch.optim.Optimizer,
+        label_smoothing: float = 0.0,
+        checkpoint_manager: Optional[CheckpointManager] = None,
         **kwargs
     ):
-        super().__init__(model, train_loader, val_loader, optimizer, **kwargs)
+        if checkpoint_manager is None:
+            checkpoint_manager = CheckpointManager(
+                checkpoint_dir="checkpoints",
+                experiment_name="task2",
+            )
+
+        super().__init__(
+            model,
+            train_loader,
+            val_loader,
+            optimizer,
+            checkpoint_manager=checkpoint_manager,
+            **kwargs,
+        )
+
+        self.label_smoothing = label_smoothing
 
     def _compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Compute loss for relationship classification."""
@@ -41,7 +59,7 @@ class Task2Trainer(BaseTrainer):
         logits = self.model(features, spatial)
 
         # Cross-entropy loss
-        loss = nn.functional.cross_entropy(logits, targets)
+        loss = nn.functional.cross_entropy(logits, targets, label_smoothing=self.label_smoothing)
 
         return loss
 

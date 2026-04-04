@@ -25,6 +25,8 @@ class RelationClassifier(BaseModel):
         spatial_dim: int = 9,
         hidden_dim: int = 512,
         dropout: float = 0.3,
+        num_layers: int = 2,
+        attention_heads: int = 8,
         fusion_method: str = "concat",  # "concat", "attention", "gated"
         device: str = "cuda"
     ):
@@ -35,13 +37,20 @@ class RelationClassifier(BaseModel):
         self.spatial_dim = spatial_dim
         self.fusion_method = fusion_method
 
+        if num_layers < 1:
+            raise ValueError("num_layers phải >= 1")
+
         # Feature fusion
         if fusion_method == "concat":
             input_dim = feature_dim + spatial_dim
         elif fusion_method == "attention":
             input_dim = feature_dim
             self.spatial_encoder = nn.Linear(spatial_dim, feature_dim)
-            self.attention = nn.MultiheadAttention(feature_dim, num_heads=8, batch_first=True)
+            if feature_dim % attention_heads != 0:
+                raise ValueError(
+                    f"feature_dim ({feature_dim}) phải chia hết cho attention_heads ({attention_heads})"
+                )
+            self.attention = nn.MultiheadAttention(feature_dim, num_heads=attention_heads, batch_first=True)
         elif fusion_method == "gated":
             input_dim = feature_dim
             self.spatial_gate = nn.Sequential(
@@ -52,12 +61,15 @@ class RelationClassifier(BaseModel):
             raise ValueError(f"Unknown fusion method: {fusion_method}")
 
         # Classification head
-        self.classifier = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, num_relations)
-        )
+        layers = []
+        current_dim = input_dim
+        for layer_idx in range(num_layers - 1):
+            layers.append(nn.Linear(current_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            current_dim = hidden_dim
+        layers.append(nn.Linear(current_dim, num_relations))
+        self.classifier = nn.Sequential(*layers)
 
     def forward(self, features: torch.Tensor, spatial: torch.Tensor) -> torch.Tensor:
         """

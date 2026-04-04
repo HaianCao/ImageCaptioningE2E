@@ -20,6 +20,7 @@ def get_train_transforms(
     roi_size: int = 224,
     mean: List[float] = IMAGENET_MEAN,
     std: List[float] = IMAGENET_STD,
+    resize_delta: int = 32,
     horizontal_flip_p: float = 0.5,
     color_jitter: bool = True,
     brightness: float = 0.2,
@@ -43,7 +44,7 @@ def get_train_transforms(
         transforms.Compose pipeline
     """
     aug_list = [
-        transforms.Resize((roi_size + 32, roi_size + 32)),  # Resize lớn hơn rồi crop
+        transforms.Resize((roi_size + resize_delta, roi_size + resize_delta)),  # Resize lớn hơn rồi crop
         transforms.RandomCrop(roi_size),
         transforms.RandomHorizontalFlip(p=horizontal_flip_p),
     ]

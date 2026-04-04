@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, List
 from .trainer import BaseTrainer
 from ..models.task1 import ObjectClassifier, AttributeClassifier
 from ..evaluation import compute_classification_metrics, compute_multilabel_metrics
+from ..utils import CheckpointManager
 
 
 class Task1Trainer(BaseTrainer):
@@ -35,14 +36,39 @@ class Task1Trainer(BaseTrainer):
         object_weight: float = 1.0,
         attribute_weight: float = 1.0,
         attribute_pos_weight: Optional[torch.Tensor] = None,
+        checkpoint_manager: Optional[CheckpointManager] = None,
+        attribute_checkpoint_manager: Optional[CheckpointManager] = None,
         **kwargs
     ):
+        if checkpoint_manager is None:
+            checkpoint_manager = CheckpointManager(
+                checkpoint_dir="checkpoints",
+                experiment_name="task1_object",
+            )
+
         # Initialize with object model as primary model
-        super().__init__(object_model, train_loader, val_loader, object_optimizer, **kwargs)
+        super().__init__(
+            object_model,
+            train_loader,
+            val_loader,
+            object_optimizer,
+            checkpoint_manager=checkpoint_manager,
+            **kwargs,
+        )
 
         self.object_model = object_model
         self.attribute_model = attribute_model
         self.attribute_optimizer = attribute_optimizer
+
+        if attribute_checkpoint_manager is None:
+            attribute_checkpoint_manager = CheckpointManager(
+                checkpoint_dir=str(self.checkpoint_manager.checkpoint_dir.parent),
+                experiment_name="task1_attribute",
+                max_checkpoints=self.checkpoint_manager.max_checkpoints,
+                save_best_only=self.checkpoint_manager.save_best_only,
+            )
+
+        self.attribute_checkpoint_manager = attribute_checkpoint_manager
 
         # Loss weights
         self.object_weight = object_weight
@@ -55,6 +81,54 @@ class Task1Trainer(BaseTrainer):
 
         # Move attribute model to device
         self.attribute_model.to(self.device)
+
+    def _train_epoch(self) -> Dict[str, float]:
+        """Train for one epoch with separate optimizers for object and attribute heads."""
+        self.object_model.train()
+        self.attribute_model.train()
+
+        epoch_loss = 0.0
+        num_batches = 0
+        combined_params = list(self.object_model.parameters()) + list(self.attribute_model.parameters())
+
+        for batch_idx, batch in enumerate(self.train_loader):
+            batch = self._move_batch_to_device(batch)
+
+            self.optimizer.zero_grad()
+            self.attribute_optimizer.zero_grad()
+
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    loss = self._compute_loss(batch)
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                self.scaler.unscale_(self.attribute_optimizer)
+            else:
+                loss = self._compute_loss(batch)
+                loss.backward()
+
+            if self.gradient_clip_val > 0:
+                torch.nn.utils.clip_grad_norm_(combined_params, self.gradient_clip_val)
+
+            if self.use_amp:
+                self.scaler.step(self.optimizer)
+                self.scaler.step(self.attribute_optimizer)
+                self.scaler.update()
+            else:
+                self.optimizer.step()
+                self.attribute_optimizer.step()
+
+            epoch_loss += loss.item()
+            num_batches += 1
+            self.global_step += 1
+
+            if batch_idx % self.log_every_n_steps == 0:
+                self._log_batch(batch, loss.item(), batch_idx)
+
+        return {
+            'train_loss': epoch_loss / num_batches,
+            'lr': self.optimizer.param_groups[0]['lr']
+        }
 
     def _compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Compute combined loss for object + attribute classification."""
@@ -174,12 +248,12 @@ class Task1Trainer(BaseTrainer):
             )
 
             # Save attribute model
-            self.checkpoint_manager.save_checkpoint(
+            self.attribute_checkpoint_manager.save_checkpoint(
                 model=self.attribute_model,
                 optimizer=self.attribute_optimizer,
                 epoch=epoch,
                 loss=metrics.get('train_loss', 0),
-                metric=metrics.get('attribute_f1_macro', 0),
+                metric=metrics.get('attribute_f1', 0),
                 task="task1_attribute",
                 filename=f"task1_attribute_epoch_{epoch}.pth"
             )
@@ -190,18 +264,30 @@ class Task1Trainer(BaseTrainer):
 
         if self.checkpoint_manager:
             # Load object model
-            obj_metadata = self.checkpoint_manager.load_checkpoint(
-                self.object_model, self.optimizer, self.scheduler,
-                checkpoint_path or "task1_object_best.pth"
-            )
+            object_checkpoint_path = checkpoint_path or self.checkpoint_manager.get_best_checkpoint_path()
+            obj_metadata = {}
+            if object_checkpoint_path:
+                obj_metadata = self.checkpoint_manager.load_checkpoint(
+                    self.object_model,
+                    self.optimizer,
+                    self.scheduler,
+                    object_checkpoint_path,
+                    load_best=False,
+                )
 
             # Load attribute model
-            attr_metadata = self.checkpoint_manager.load_checkpoint(
-                self.attribute_model, self.attribute_optimizer, None,
-                checkpoint_path or "task1_attribute_best.pth"
-            )
+            attr_checkpoint_path = self.attribute_checkpoint_manager.get_best_checkpoint_path()
+            attr_metadata = {}
+            if attr_checkpoint_path:
+                attr_metadata = self.attribute_checkpoint_manager.load_checkpoint(
+                    self.attribute_model,
+                    self.attribute_optimizer,
+                    None,
+                    attr_checkpoint_path,
+                    load_best=False,
+                )
 
-            metadata = {**obj_metadata, **attr_metadata}
+            metadata = {**obj_metadata, **{f"attribute_{k}": v for k, v in attr_metadata.items()}}
             self.current_epoch = metadata.get('epoch', 0)
 
         return metadata

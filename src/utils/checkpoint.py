@@ -48,12 +48,13 @@ class CheckpointManager:
                     # Load metadata from checkpoint
                     checkpoint = torch.load(ckpt_file, map_location='cpu', weights_only=False)
                     metadata = checkpoint.get('metadata', {})
+                    metric_value = metadata.get('metric', metadata.get('best_metric', float('-inf')))
 
                     self.checkpoints.append({
                         'path': ckpt_file,
                         'epoch': metadata.get('epoch', 0),
                         'loss': metadata.get('loss', float('inf')),
-                        'metric': metadata.get('best_metric', float('-inf')),
+                        'metric': metric_value,
                         'timestamp': ckpt_file.stat().st_mtime
                     })
                 except Exception as e:
@@ -89,10 +90,15 @@ class CheckpointManager:
         Returns:
             Path to saved checkpoint
         """
+        current_metric = float(metric) if metric is not None else float('-inf')
+        is_best = metric is not None and metric > self.best_metric
+
+        if is_best:
+            self.best_metric = metric
+
         if filename is None:
-            if metric is not None and metric > self.best_metric:
+            if is_best:
                 filename = "best_model.pth"
-                self.best_metric = metric
             else:
                 filename = f"checkpoint_epoch_{epoch}.pth"
 
@@ -104,6 +110,7 @@ class CheckpointManager:
             'metadata': {
                 'epoch': epoch,
                 'loss': loss,
+                'metric': current_metric,
                 'best_metric': self.best_metric,
                 **metadata
             }
@@ -182,6 +189,10 @@ class CheckpointManager:
 
         # Keep best checkpoint + recent ones
         keep_files = set()
+
+        if self.checkpoints:
+            best_ckpt = max(self.checkpoints, key=lambda x: x['metric'])
+            keep_files.add(str(best_ckpt['path']))
 
         # Always keep best model
         best_files = [ckpt for ckpt in self.checkpoints if ckpt['path'].name == "best_model.pth"]

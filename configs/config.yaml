@@ -2,60 +2,79 @@
 # Global Configuration
 # ============================================================
 
-project_name: "visual-genome-caption"
-seed: 42
-device: "cuda"  # "cuda" or "cpu"
+project_name: "visual-genome-caption"  # Experiment name used in logs, checkpoints, and reports
+seed: 42  # Global random seed for reproducible sampling, splitting, and training
+device: "cuda"  # Execution device: "cuda" for GPU or "cpu" for CPU
 
 # ── Paths ──────────────────────────────────────────────────
 paths:
-  data_dir: "data"
-  raw_dir: "data/raw"
-  processed_dir: "data/processed"
-  feature_dir: "data/features"       # Cached feature files (.pt)
-  checkpoint_dir: "checkpoints"
-  log_dir: "logs"
+  data_dir: "data"  # Root folder for all dataset artifacts
+  raw_dir: "data/raw"  # Downloaded raw Visual Genome metadata and images
+  processed_dir: "data/processed"  # Preprocessed annotations and split files
+  feature_dir: "data/features"       # Shared feature cache root (.pt files)
+  checkpoint_dir: "checkpoints"  # Directory for saved model checkpoints
+  log_dir: "logs"  # Directory for training logs and TensorBoard outputs
 
 # ── HuggingFace Dataset ────────────────────────────────────
 dataset:
-  repo_id: "ranjaykrishna/visual_genome"
-  cache_dir: "data/raw/hf_cache"
-  image_dir: "data/raw/images"
+  repo_id: "ranjaykrishna/visual_genome"  # Hugging Face dataset repository ID
+  cache_dir: "data/raw/hf_cache"  # Local Hugging Face cache directory
+  image_dir: "data/raw/images"  # Download destination for VG image files
 
 # ── Image Processing ───────────────────────────────────────
 image:
-  roi_size: 224          # Size to resize ROI crops
-  mean: [0.485, 0.456, 0.406]    # ImageNet mean
-  std: [0.229, 0.224, 0.225]     # ImageNet std
+  roi_size: 224          # Final ROI crop size fed to the encoder
+  mean: [0.485, 0.456, 0.406]    # Channel-wise normalization mean
+  std: [0.229, 0.224, 0.225]     # Channel-wise normalization std
 
 # ── Data Split ─────────────────────────────────────────────
 split:
-  train: 0.70
-  val: 0.15
-  test: 0.15
+  train: 0.70  # Proportion of data assigned to training
+  val: 0.15  # Proportion of data assigned to validation
+  test: 0.15  # Proportion of data assigned to test
 
 # ── General Training ───────────────────────────────────────
 training:
-  batch_size: 64
-  num_workers: 4
-  pin_memory: true
-  max_epochs: 30
-  early_stopping_patience: 5
-  gradient_clip_val: 1.0
-  log_every_n_steps: 50
+  batch_size: 64  # Default batch size for training DataLoaders
+  num_workers: 4  # Number of DataLoader worker processes
+  pin_memory: true  # Pin host memory to speed up CPU->GPU transfer
+  max_epochs: 30  # Maximum number of training epochs
+  early_stopping_patience: 5  # Stop after this many non-improving validation epochs
+  gradient_clip_val: 1.0  # Maximum gradient norm used for clipping
+  log_every_n_steps: 50  # Frequency of batch-level logging
 
 # ── Optimizer ──────────────────────────────────────────────
 optimizer:
-  name: "adamw"          # "adam", "adamw", "sgd"
-  lr: 1.0e-4
-  weight_decay: 1.0e-4
+  name: "adamw"          # Optimizer algorithm: "adam", "adamw", or "sgd"
+  lr: 1.0e-4  # Initial learning rate
+  weight_decay: 1.0e-4  # L2 regularization strength
 
 # ── LR Scheduler ───────────────────────────────────────────
 scheduler:
-  name: "cosine"         # "cosine", "step", "plateau"
-  warmup_epochs: 2
+  name: "cosine"         # LR scheduler policy: "cosine", "step", or "plateau"
+  warmup_epochs: 2  # Warmup epochs before the main LR schedule starts
 
 # ── Logging ────────────────────────────────────────────────
 logging:
-  use_tensorboard: true
-  use_wandb: false
-  wandb_project: "vg-caption"
+  use_tensorboard: true  # Write TensorBoard events during training
+  use_wandb: false  # Enable Weights & Biases logging
+  wandb_project: "vg-caption"  # W&B project name when logging is enabled
+
+# ── Runtime / Notebook Controls ────────────────────────────
+pipeline:
+  training_mode: "both"  # Pipeline scope: "task1", "task2", or "both"
+  download_data: true  # Download missing metadata/images before preprocessing
+  pre_extract_features: true  # Precompute and cache visual features before training
+
+sampling:
+  strict_mode: true  # Sample image IDs first, then split before any extra downloads
+  sample_size: 200  # Number of image IDs to select in strict sample mode
+  split_ratios: [0.8, 0.1, 0.1]  # Train/val/test ratios for the sampled image set
+  seed: 42  # Seed for deterministic sampling and split assignment
+  image_download_mode: "sample"  # Image download policy: "none", "sample", or "all"
+  max_samples: null  # Optional per-split sample cap for fast debugging
+
+feature_extraction:
+  batch_size: 128  # Batch size used during feature extraction
+  resize_size: 256  # Resize size before center crop
+  crop_size: 224  # Final crop size fed to the backbone

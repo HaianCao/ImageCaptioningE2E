@@ -7,6 +7,7 @@ Uses template-based generation for simplicity and interpretability.
 import random
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+import torch
 
 
 class CaptionGenerator:
@@ -87,6 +88,75 @@ class CaptionGenerator:
 
         return caption
 
+    def _decode_class_prediction(self, value: Any) -> Optional[int]:
+        """Decode a single class prediction from logits, tensors, or scalars."""
+        if value is None:
+            return None
+
+        if isinstance(value, torch.Tensor):
+            tensor = value.detach().cpu()
+            if tensor.ndim == 0:
+                return int(tensor.item())
+            if tensor.ndim > 1:
+                tensor = tensor[0]
+            if tensor.dtype.is_floating_point:
+                return int(torch.argmax(tensor).item())
+            if tensor.numel() == 1:
+                return int(tensor.item())
+            return int(tensor.flatten()[0].item())
+
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return None
+            first = value[0]
+            if isinstance(first, (list, tuple, torch.Tensor)):
+                return self._decode_class_prediction(first)
+            try:
+                return int(first)
+            except (TypeError, ValueError):
+                return None
+
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _decode_attributes(self, value: Any, top_k: int = 3) -> List[str]:
+        """Decode active attribute names from logits or binary predictions."""
+        if value is None:
+            return []
+
+        indices: List[int] = []
+
+        if isinstance(value, torch.Tensor):
+            tensor = value.detach().cpu()
+            if tensor.ndim > 1:
+                tensor = tensor[0]
+            if tensor.dtype.is_floating_point:
+                active = torch.nonzero(torch.sigmoid(tensor) > 0.5, as_tuple=True)[0]
+            else:
+                active = torch.nonzero(tensor > 0, as_tuple=True)[0]
+            indices = active.tolist()
+        elif isinstance(value, (list, tuple)):
+            if not value:
+                return []
+            first = value[0]
+            if isinstance(first, (list, tuple, torch.Tensor)):
+                return self._decode_attributes(first, top_k=top_k)
+            try:
+                indices = [int(item) for item in value]
+            except (TypeError, ValueError):
+                return []
+        else:
+            return []
+
+        attributes = []
+        for idx in indices[:top_k]:
+            name = self.idx_to_attribute.get(int(idx), "")
+            if name:
+                attributes.append(name)
+        return attributes
+
     def generate_from_predictions(
         self,
         task1_results: Dict[str, Any],
@@ -106,38 +176,46 @@ class CaptionGenerator:
         """
         captions = []
 
-        # Extract top predictions
-        if 'object_preds' in task1_results and 'relation_preds' in task2_results:
-            # Get top object predictions
-            obj_logits = task1_results.get('object_logits', [])
-            attr_logits = task1_results.get('attribute_logits', [])
+        object_source = task1_results.get("object_preds")
+        if object_source is None:
+            object_source = task1_results.get("object_logits")
+        if object_source is None:
+            object_source = task1_results.get("object_pred")
 
-            # Get top relation predictions
-            rel_logits = task2_results.get('relation_logits', [])
+        relation_source = task2_results.get("relation_preds")
+        if relation_source is None:
+            relation_source = task2_results.get("relation_logits")
+        if relation_source is None:
+            relation_source = task2_results.get("relation_pred")
 
-            # For simplicity, take top-1 for each
-            if obj_logits and rel_logits:
-                obj_pred = obj_logits.argmax(dim=1).item()
-                rel_pred = rel_logits.argmax(dim=1).item()
+        attribute_source = task1_results.get("attribute_preds")
+        if attribute_source is None:
+            attribute_source = task1_results.get("attribute_logits")
 
-                subject_name = self.idx_to_object.get(obj_pred, "object")
-                object_name = self.idx_to_object.get(obj_pred, "object")  # Same for demo
-                relation = self.idx_to_relation.get(rel_pred, "relates to")
+        obj_pred = self._decode_class_prediction(object_source)
+        rel_pred = self._decode_class_prediction(relation_source)
 
-                # Get attributes above threshold
-                if attr_logits:
-                    attr_probs = (attr_logits.sigmoid() > 0.5).nonzero(as_tuple=True)[1]
-                    attributes = [self.idx_to_attribute.get(idx.item(), "")
-                                for idx in attr_probs[:3]]  # Top 3 attributes
-                else:
-                    attributes = []
+        subject_name = task2_results.get("subject_name") or (self.idx_to_object.get(obj_pred, "object") if obj_pred is not None else None)
+        object_name = task2_results.get("object_name") or (self.idx_to_object.get(obj_pred, "object") if obj_pred is not None else None)
+        relation = task2_results.get("predicate")
+        if relation is None and rel_pred is not None:
+            relation = self.idx_to_relation.get(rel_pred, "relates to")
+        if relation is None:
+            relation = "relates to"
 
-                # Generate multiple captions
-                for i in range(min(top_k, len(self.templates))):
-                    caption = self.generate_caption(
-                        subject_name, object_name, attributes, relation, template_idx=i
-                    )
-                    captions.append(caption)
+        if subject_name and object_name:
+            attributes = self._decode_attributes(attribute_source)
+
+            # Generate multiple captions
+            for i in range(min(top_k, len(self.templates))):
+                caption = self.generate_caption(
+                    subject_name,
+                    object_name,
+                    attributes,
+                    relation,
+                    template_idx=i,
+                )
+                captions.append(caption)
 
         return captions if captions else ["A scene with objects and relationships."]
 

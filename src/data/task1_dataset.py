@@ -81,10 +81,19 @@ class ObjectAttributeDataset(BaseVGDataset):
 
         # Load feature cache nếu có
         self._feature_cache: Optional[Dict] = None
+        self.cached_feature_dim: Optional[int] = None
         if feature_cache_file and Path(feature_cache_file).exists():
             print(f"[Task1Dataset] Loading feature cache: {feature_cache_file}")
             self._feature_cache = torch.load(feature_cache_file, map_location="cpu")
-            print(f"[Task1Dataset] Loaded {len(self._feature_cache)} cached features")
+            cache_size = len(self._feature_cache) if self._feature_cache is not None else 0
+            print(f"[Task1Dataset] Loaded {cache_size} cached features")
+            if self._feature_cache:
+                first_feature = next(iter(self._feature_cache.values()))
+                if isinstance(first_feature, torch.Tensor) and first_feature.ndim >= 1:
+                    self.cached_feature_dim = int(first_feature.shape[-1])
+            else:
+                print(f"[Task1Dataset] Feature cache is empty; falling back to image mode")
+                self._feature_cache = None
 
         # Giới hạn samples nếu cần
         if max_samples and max_samples < len(self.samples):
@@ -143,9 +152,12 @@ class ObjectAttributeDataset(BaseVGDataset):
         # Chế độ feature cache
         if self._feature_cache is not None:
             key = str(sample.get("object_id", idx))
-            if key not in self._feature_cache:
-                key = str(idx)
-            feature = self._feature_cache.get(key, torch.zeros(2048))
+            feature = self._feature_cache.get(key)
+            if feature is None:
+                feature = self._feature_cache.get(str(idx))
+            if feature is None:
+                feature_dim = self.cached_feature_dim or 2048
+                feature = torch.zeros(feature_dim, dtype=torch.float32)
             return {
                 "feature": feature,
                 "object_label": object_label,
@@ -184,7 +196,18 @@ def build_task1_datasets(
     image_dir: str,
     roi_size: int = 224,
     use_feature_cache: bool = True,
+    feature_cache_dir: Optional[str] = None,
     max_samples: Optional[int] = None,
+    train_horizontal_flip_p: float = 0.5,
+    train_color_jitter: bool = True,
+    train_brightness: float = 0.2,
+    train_contrast: float = 0.2,
+    train_saturation: float = 0.2,
+    train_hue: float = 0.1,
+    train_random_erasing_p: float = 0.0,
+    train_resize_delta: int = 32,
+    mean: List[float] = None,
+    std: List[float] = None,
 ) -> Tuple["ObjectAttributeDataset", "ObjectAttributeDataset", "ObjectAttributeDataset"]:
     """
     Tạo train/val/test datasets cho Task 1 từ processed directory.
@@ -200,17 +223,35 @@ def build_task1_datasets(
         Tuple (train_dataset, val_dataset, test_dataset)
     """
     proc_path = Path(processed_dir)
+    cache_root = Path(feature_cache_dir) if feature_cache_dir else proc_path / "features"
+    if not cache_root.is_absolute():
+        cache_root = proc_path / cache_root
+
+    mean = mean or [0.485, 0.456, 0.406]
+    std = std or [0.229, 0.224, 0.225]
 
     object_vocab = load_vocab(str(proc_path / "object_vocab.json"))
     attribute_vocab = load_vocab(str(proc_path / "attribute_vocab.json"))
 
-    train_transform = get_train_transforms(roi_size=roi_size)
-    val_transform = get_val_transforms(roi_size=roi_size)
+    train_transform = get_train_transforms(
+        roi_size=roi_size,
+        mean=mean,
+        std=std,
+        resize_delta=train_resize_delta,
+        horizontal_flip_p=train_horizontal_flip_p,
+        color_jitter=train_color_jitter,
+        brightness=train_brightness,
+        contrast=train_contrast,
+        saturation=train_saturation,
+        hue=train_hue,
+        random_erasing_p=train_random_erasing_p,
+    )
+    val_transform = get_val_transforms(roi_size=roi_size, mean=mean, std=std)
 
     def _make_ds(split, transform):
         cache_file = None
         if use_feature_cache:
-            cache_path = proc_path / "features" / f"{split}_features.pt"
+            cache_path = cache_root / f"{split}_features.pt"
             if cache_path.exists():
                 cache_file = str(cache_path)
 

@@ -11,7 +11,6 @@ from .metrics import *
 
 __all__ = [
     'compute_classification_metrics',
-    'compute_mAP',
     'compute_multilabel_metrics',
     'compute_caption_metrics'
 ]

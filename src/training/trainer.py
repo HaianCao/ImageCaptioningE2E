@@ -149,7 +149,13 @@ class BaseTrainer(ABC):
             try:
                 best_path = self.checkpoint_manager.get_best_checkpoint_path()
                 if best_path:
-                    self.checkpoint_manager.load_checkpoint(self.model, self.optimizer, self.scheduler)
+                    self.checkpoint_manager.load_checkpoint(
+                        self.model,
+                        self.optimizer,
+                        self.scheduler,
+                        checkpoint_path=best_path,
+                        load_best=False,
+                    )
                     self.logger.info("Loaded best checkpoint")
             except Exception as e:
                 self.logger.warning(f"Could not load best checkpoint: {e}")

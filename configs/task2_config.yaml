@@ -2,65 +2,69 @@
 # Task 2 Configuration: Relationship Classification
 # ============================================================
 
-task: "task2"
+task: "task2"  # Task identifier for the Task 2 pipeline
 
 # ── Visual Backbone ────────────────────────────────────────
 # Options: "resnet50", "resnet101", "efficientnet_b3",
 #          "efficientnet_b5", "vit_base_16", "vit_large_16"
 backbone:
-  name: "resnet50"
-  pretrained: true
-  freeze_backbone: false
-  freeze_epochs: 0
-  feature_dim: 2048           # Per-region feature dim
+  name: "resnet50"  # Backbone architecture used for pairwise feature extraction
+  pretrained: true  # Load pretrained weights for the backbone
+  freeze_backbone: false  # Freeze backbone weights during training when true
+  freeze_epochs: 0  # Number of epochs to keep the backbone frozen before unfreezing
+  feature_dim: 2048           # Output feature dimension per region
 
 # ── Dataset ────────────────────────────────────────────────
 dataset:
-  processed_dir: "data/processed/task2"
-  feature_cache_dir: "data/features/task2"
-  use_feature_cache: true
+  processed_dir: "data/processed/task2"  # Processed Task 2 annotations and vocabularies
+  feature_cache_dir: "features"  # Relative cache folder for pre-extracted features
+  use_feature_cache: true  # Read cached features instead of raw images
 
 # ── Label Space ────────────────────────────────────────────
 labels:
-  relation_vocab_file: "data/processed/task2/relation_vocab.json"
-  max_relations: 100          # Top-N most frequent relation types
-  predicate_vocab_file: "data/processed/task2/predicate_vocab.json"
+  relation_vocab_file: "data/processed/task2/relation_vocab.json"  # Relation vocabulary file generated during preprocessing
+  max_relations: 100          # Keep the top-N most frequent relation types
+  predicate_vocab_file: "data/processed/task2/predicate_vocab.json"  # Raw predicate vocabulary file path
 
 # ── Spatial Features ───────────────────────────────────────
 spatial:
-  use_spatial_features: true   # Append geometric features
+  use_spatial_features: true   # Append geometric features to the visual pair representation
   # Features: [x1,y1,x2,y2 (normalized)] x2 for each bbox + IoU + distance = 9 dims
-  spatial_dim: 9
+  spatial_dim: 9  # Number of spatial features per relationship pair
 
 # ── Model Architecture ─────────────────────────────────────
 model:
-  # Fusion strategy: "concat", "add", "cross_attention"
-  fusion_method: "concat"
+  # Fusion strategy: "concat", "attention", "gated"
+  fusion_method: "concat"  # Feature fusion strategy used before classification
   # Input dim = feature_dim * 2 + spatial_dim (if use_spatial_features)
-  hidden_dim: 1024
-  dropout: 0.4
-  num_layers: 2               # MLP depth
+  hidden_dim: 1024  # Hidden width of the relation MLP head
+  dropout: 0.4  # Dropout rate used in the relation head
+  num_layers: 2               # Number of linear layers in the relation head
+  attention_heads: 8          # Number of attention heads when using attention fusion
 
 # ── Loss ───────────────────────────────────────────────────
 loss:
-  label_smoothing: 0.1        # Smoothing for CrossEntropy
+  label_smoothing: 0.1        # Cross-entropy label smoothing factor
 
 # ── Training Overrides ─────────────────────────────────────
 training:
-  batch_size: 64
-  max_epochs: 35
-  lr: 3.0e-4
+  batch_size: 64  # Batch size used by Task 2 DataLoaders
+  max_epochs: 35  # Maximum Task 2 training epochs
+  lr: 3.0e-4  # Learning rate for Task 2 optimizer
 
 # ── Data Augmentation ──────────────────────────────────────
 augmentation:
-  random_horizontal_flip: 0.5   # Flip both bboxes together
+  resize_delta: 32  # Extra pixels added before random crop
+  random_horizontal_flip: 0.5   # Probability of flipping both boxes together
   color_jitter:
-    brightness: 0.2
-    contrast: 0.2
-    saturation: 0.1
-    hue: 0.05
+    enabled: true  # Enable or disable color jitter
+    brightness: 0.2  # Brightness jitter magnitude
+    contrast: 0.2  # Contrast jitter magnitude
+    saturation: 0.1  # Saturation jitter magnitude
+    hue: 0.05  # Hue jitter magnitude
+  random_erasing_p: 0.0  # Probability of applying random erasing
 
 # ── Evaluation ─────────────────────────────────────────────
 eval:
-  relation_top_k: [1, 3, 5]
-  iou_threshold: 0.5         # Min IoU for a valid pair
+  relation_top_k: [1, 3, 5]  # Top-k values reported for relation accuracy
+  iou_threshold: 0.5         # Minimum IoU required for a valid relationship pair

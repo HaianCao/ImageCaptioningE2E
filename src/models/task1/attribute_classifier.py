@@ -24,6 +24,7 @@ class AttributeClassifier(BaseModel):
         feature_dim: int = 2048,
         hidden_dim: int = 512,
         dropout: float = 0.3,
+        num_layers: int = 2,
         device: str = "cuda"
     ):
         super().__init__(device)
@@ -31,13 +32,19 @@ class AttributeClassifier(BaseModel):
         self.num_attributes = num_attributes
         self.feature_dim = feature_dim
 
-        # Multi-label classification head
-        self.classifier = nn.Sequential(
-            nn.Linear(feature_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, num_attributes)
-        )
+        if num_layers < 1:
+            raise ValueError("num_layers phải >= 1")
+
+        layers = []
+        current_dim = feature_dim
+        for layer_idx in range(num_layers - 1):
+            layers.append(nn.Linear(current_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            current_dim = hidden_dim
+        layers.append(nn.Linear(current_dim, num_attributes))
+
+        self.classifier = nn.Sequential(*layers)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         """

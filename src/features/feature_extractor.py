@@ -32,7 +32,11 @@ class FeatureExtractor(nn.Module):
         backbone: str = "resnet50",
         pretrained: bool = True,
         feature_dim: Optional[int] = None,
-        device: str = "cuda"
+        device: str = "cuda",
+        resize_size: int = 256,
+        crop_size: int = 224,
+        mean: Optional[List[float]] = None,
+        std: Optional[List[float]] = None,
     ):
         super().__init__()
 
@@ -60,11 +64,13 @@ class FeatureExtractor(nn.Module):
         self.backbone.eval()
 
         # Image preprocessing
+        mean = mean or [0.485, 0.456, 0.406]
+        std = std or [0.229, 0.224, 0.225]
         self.transform = T.Compose([
-            T.Resize(256),
-            T.CenterCrop(224),
+            T.Resize(resize_size),
+            T.CenterCrop(crop_size),
             T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            T.Normalize(mean=mean, std=std)
         ])
 
     @torch.no_grad()
@@ -170,8 +176,13 @@ def extract_task1_features(
     image_dir: str,
     output_file: str,
     backbone: str = "resnet50",
-    batch_size: int = 64,
-    device: str = "cuda"
+    pretrained: bool = True,
+    batch_size: int = 32,
+    device: str = "cuda",
+    resize_size: int = 256,
+    crop_size: int = 224,
+    mean: Optional[List[float]] = None,
+    std: Optional[List[float]] = None,
 ) -> None:
     """
     Pre-extract features for Task 1 dataset.
@@ -200,7 +211,15 @@ def extract_task1_features(
         image_groups[sample['image_id']].append(sample)
 
     # Initialize extractor
-    extractor = FeatureExtractor(backbone=backbone, device=device)
+    extractor = FeatureExtractor(
+        backbone=backbone,
+        pretrained=pretrained,
+        device=device,
+        resize_size=resize_size,
+        crop_size=crop_size,
+        mean=mean,
+        std=std,
+    )
 
     # Process each image
     all_features = {}
@@ -214,10 +233,10 @@ def extract_task1_features(
 
         features = extractor.extract_roi_features(image, bboxes, batch_size=batch_size)
 
-        # Store features by sample index
+        # Store features by object_id so the dataset can look them up directly.
         for i, sample in enumerate(img_samples):
-            sample_idx = samples.index(sample)
-            all_features[str(sample_idx)] = features[i]
+            feature_key = sample.get('object_id', i)
+            all_features[str(feature_key)] = features[i]
 
     # Save features
     output_path = Path(output_file)
@@ -231,8 +250,13 @@ def extract_task2_features(
     image_dir: str,
     output_file: str,
     backbone: str = "resnet50",
-    batch_size: int = 64,
-    device: str = "cuda"
+    pretrained: bool = True,
+    batch_size: int = 32,
+    device: str = "cuda",
+    resize_size: int = 256,
+    crop_size: int = 224,
+    mean: Optional[List[float]] = None,
+    std: Optional[List[float]] = None,
 ) -> None:
     """
     Pre-extract features for Task 2 dataset.
@@ -261,7 +285,15 @@ def extract_task2_features(
         image_groups[sample['image_id']].append(sample)
 
     # Initialize extractor
-    extractor = FeatureExtractor(backbone=backbone, device=device)
+    extractor = FeatureExtractor(
+        backbone=backbone,
+        pretrained=pretrained,
+        device=device,
+        resize_size=resize_size,
+        crop_size=crop_size,
+        mean=mean,
+        std=std,
+    )
 
     # Process each image
     all_features = {}
