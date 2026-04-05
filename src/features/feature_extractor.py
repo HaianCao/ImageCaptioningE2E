@@ -18,6 +18,27 @@ from .roi_extractor import extract_roi, extract_union_roi
 from ..utils.memory import cleanup_cuda_memory
 
 
+def _load_image_cached(
+    image_dir: Union[str, Path],
+    image_id: int,
+    image_cache: Dict[int, Image.Image],
+) -> Optional[Image.Image]:
+    """Load an image once per batch and reuse it for samples from the same image."""
+    cached_image = image_cache.get(image_id)
+    if cached_image is not None:
+        return cached_image
+
+    image_path = Path(image_dir) / f"{image_id}.jpg"
+    if not image_path.exists():
+        return None
+
+    with Image.open(image_path) as image:
+        loaded_image = image.convert("RGB")
+
+    image_cache[image_id] = loaded_image
+    return loaded_image
+
+
 class FeatureExtractor(nn.Module):
     """
     Wrapper around pretrained vision backbones for feature extraction.
@@ -188,6 +209,9 @@ def extract_task1_features(
     """
     Pre-extract features for Task 1 dataset.
 
+    The batch_size is applied across samples, so a single batch can contain ROIs
+    from multiple images.
+
     Args:
         annotation_file: Path to task1 annotations JSON
         image_dir: Directory containing images
@@ -197,19 +221,12 @@ def extract_task1_features(
         device: Device for extraction
     """
     import json
-    from collections import defaultdict
-
     print(f"Extracting Task 1 features using {backbone}...")
 
     # Load annotations
     with open(annotation_file, 'r') as f:
         raw = json.load(f)
         samples = raw if isinstance(raw, list) else raw.get("samples", [])
-
-    # Group by image_id
-    image_groups = defaultdict(list)
-    for sample in samples:
-        image_groups[sample['image_id']].append(sample)
 
     # Initialize extractor
     extractor = FeatureExtractor(
@@ -222,22 +239,30 @@ def extract_task1_features(
         std=std,
     )
 
-    # Process each image
+    # Process samples in batches across multiple images
     all_features = {}
-    for image_id, img_samples in tqdm(image_groups.items(), desc="Processing images"):
-        image_path = Path(image_dir) / f"{image_id}.jpg"
-        if not image_path.exists():
+    indexed_samples = list(enumerate(samples))
+    for batch_start in tqdm(range(0, len(indexed_samples), batch_size), desc="Processing batches"):
+        batch_items = indexed_samples[batch_start:batch_start + batch_size]
+        batch_image_cache: Dict[int, Image.Image] = {}
+        batch_rois: List[Image.Image] = []
+        batch_keys: List[str] = []
+
+        for global_index, sample in batch_items:
+            image = _load_image_cached(image_dir, sample['image_id'], batch_image_cache)
+            if image is None:
+                continue
+
+            batch_rois.append(extract_roi(image, tuple(sample['bbox'])))
+            batch_keys.append(str(sample.get('object_id', global_index)))
+
+        if not batch_rois:
             continue
 
-        image = Image.open(image_path).convert('RGB')
-        bboxes = [s['bbox'] for s in img_samples]
+        features = extractor.extract_features(batch_rois)
 
-        features = extractor.extract_roi_features(image, bboxes, batch_size=batch_size)
-
-        # Store features by object_id so the dataset can look them up directly.
-        for i, sample in enumerate(img_samples):
-            feature_key = sample.get('object_id', i)
-            all_features[str(feature_key)] = features[i]
+        for feature_key, feature in zip(batch_keys, features):
+            all_features[feature_key] = feature
 
     # Save features
     output_path = Path(output_file)
@@ -265,6 +290,9 @@ def extract_task2_features(
     """
     Pre-extract features for Task 2 dataset.
 
+    The batch_size is applied across samples, so a single batch can contain
+    union ROIs from multiple images.
+
     Args:
         annotation_file: Path to task2 annotations JSON
         image_dir: Directory containing images
@@ -274,19 +302,12 @@ def extract_task2_features(
         device: Device for extraction
     """
     import json
-    from collections import defaultdict
-
     print(f"Extracting Task 2 features using {backbone}...")
 
     # Load annotations
     with open(annotation_file, 'r') as f:
         raw = json.load(f)
         samples = raw if isinstance(raw, list) else raw.get("samples", [])
-
-    # Group by image_id
-    image_groups = defaultdict(list)
-    for sample in samples:
-        image_groups[sample['image_id']].append(sample)
 
     # Initialize extractor
     extractor = FeatureExtractor(
@@ -299,22 +320,32 @@ def extract_task2_features(
         std=std,
     )
 
-    # Process each image
+    # Process samples in batches across multiple images
     all_features = {}
-    for image_id, img_samples in tqdm(image_groups.items(), desc="Processing images"):
-        image_path = Path(image_dir) / f"{image_id}.jpg"
-        if not image_path.exists():
+    indexed_samples = list(enumerate(samples))
+    for batch_start in tqdm(range(0, len(indexed_samples), batch_size), desc="Processing batches"):
+        batch_items = indexed_samples[batch_start:batch_start + batch_size]
+        batch_image_cache: Dict[int, Image.Image] = {}
+        batch_unions: List[Image.Image] = []
+        batch_keys: List[str] = []
+
+        for global_index, sample in batch_items:
+            image = _load_image_cached(image_dir, sample['image_id'], batch_image_cache)
+            if image is None:
+                continue
+
+            batch_unions.append(
+                extract_union_roi(image, tuple(sample['subject_bbox']), tuple(sample['object_bbox']))
+            )
+            batch_keys.append(str(sample.get('relationship_id', global_index)))
+
+        if not batch_unions:
             continue
 
-        image = Image.open(image_path).convert('RGB')
-        bbox_pairs = [(s['subject_bbox'], s['object_bbox']) for s in img_samples]
+        features = extractor.extract_features(batch_unions)
 
-        features = extractor.extract_union_features(image, bbox_pairs, batch_size=batch_size)
-
-        # Store features by relationship_id
-        for i, sample in enumerate(img_samples):
-            rel_id = sample.get('relationship_id', i)
-            all_features[str(rel_id)] = features[i]
+        for feature_key, feature in zip(batch_keys, features):
+            all_features[feature_key] = feature
 
     # Save features
     output_path = Path(output_file)
