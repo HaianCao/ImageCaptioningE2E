@@ -41,7 +41,7 @@ training:
   max_epochs: 30  # Maximum number of training epochs
   early_stopping_patience: 5  # Stop after this many non-improving validation epochs
   gradient_clip_val: 1.0  # Maximum gradient norm used for clipping
-  log_every_n_steps: 50  # Frequency of batch-level logging
+  log_every_n_steps: 0  # Batch logging frequency; set 0 to disable batch-step logs
 
 # ── Optimizer ──────────────────────────────────────────────
 optimizer:

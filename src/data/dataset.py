@@ -78,7 +78,7 @@ class BaseVGDataset(Dataset, ABC):
         if not img_path.exists():
             raise FileNotFoundError(
                 f"Không tìm thấy ảnh: {img_path}. "
-                f"Hãy chạy notebook 00_setup_and_download.ipynb trước."
+                f"Hãy chạy notebook notebooks/complete_pipeline.ipynb hoặc đảm bảo ảnh đã được tải về."
             )
 
         image = Image.open(img_path).convert("RGB")

@@ -122,7 +122,7 @@ class Task1Trainer(BaseTrainer):
             num_batches += 1
             self.global_step += 1
 
-            if batch_idx % self.log_every_n_steps == 0:
+            if self.log_every_n_steps > 0 and batch_idx % self.log_every_n_steps == 0:
                 self._log_batch(batch, loss.item(), batch_idx)
 
         return {
@@ -203,8 +203,17 @@ class Task1Trainer(BaseTrainer):
         metrics = {}
         for key, value in object_metrics.items():
             metrics[f'object_{key}'] = value
-        for key, value in attribute_metrics.items():
-            metrics[f'attribute_{key}'] = value
+
+        if 'exact_match_accuracy' in attribute_metrics:
+            metrics['attribute_exact_match_accuracy'] = attribute_metrics['exact_match_accuracy']
+        elif 'accuracy' in attribute_metrics:
+            metrics['attribute_exact_match_accuracy'] = attribute_metrics['accuracy']
+
+        if 'sample_accuracy' in attribute_metrics:
+            metrics['attribute_sample_accuracy'] = attribute_metrics['sample_accuracy']
+
+        if 'f1' in attribute_metrics:
+            metrics['attribute_f1'] = attribute_metrics['f1']
 
         return metrics
 

@@ -26,6 +26,7 @@
 - Sửa feature cache để khớp key, xử lý cache rỗng an toàn và đồng bộ cache path với config.
 - Cập nhật `CaptionGenerator` để nhận đúng output thực tế từ trainer.
 - Biến [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) thành full pipeline config-driven: load YAML, fail-fast khi thiếu dữ liệu, strict sample mode, preprocess, extract feature, train, evaluate test, caption demo.
+- Thêm [notebooks/01_eda.ipynb](notebooks/01_eda.ipynb) làm notebook khám phá dữ liệu riêng.
 - Cập nhật [README.md](README.md) để phản ánh workflow hiện tại và bỏ các hướng dẫn hardcode cũ.
 
 ❌ **Cần tinh chỉnh / Đang thực hiện**:
@@ -62,13 +63,17 @@
   - Extract feature batching để tạo cache `.pt`.
 
 ### 2.3. Module `src/models`
-- `task1/object_classifier.py` & `attribute_classifier.py`: MLP head cho classification.
+- `task1/object_classifier.py` & `attribute_classifier.py`:
+  - `ObjectClassifier`: single-label classification head, dùng cho 1 nhãn object chính mỗi sample.
+  - `AttributeClassifier`: multi-label classification head, dùng sigmoid/BCE và số nhãn active có thể thay đổi theo từng object.
 - `task2/relation_classifier.py`: MLP dự đoán quan hệ.
 - `caption/caption_generator.py`: Template-based caption generator, đã được nối lại để đọc output thực tế từ Task 1/2.
+- `notebooks/01_eda.ipynb`: Notebook khám phá dữ liệu, thống kê phân phối nhãn và xem mẫu ảnh.
 
 ### 2.4. Module `src/evaluation`
 - `metrics.py`:
   - Classification metrics cho Task 1/2: accuracy + F1.
+  - Multi-label Task 1 attributes có thêm exact-match accuracy và sample-wise accuracy.
   - Caption metrics vẫn còn trong module nhưng không phải trọng tâm hiện tại.
 
 ---

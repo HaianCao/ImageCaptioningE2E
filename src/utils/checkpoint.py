@@ -130,7 +130,8 @@ class CheckpointManager:
         # Cleanup old checkpoints
         self._cleanup_old_checkpoints()
 
-        print(f"Checkpoint saved: {checkpoint_path}")
+        if is_best:
+            print(f"Checkpoint saved (best): {checkpoint_path}")
         return str(checkpoint_path)
 
     def load_checkpoint(
@@ -177,9 +178,6 @@ class CheckpointManager:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         metadata = checkpoint.get('metadata', {})
-        print(f"Checkpoint loaded: {checkpoint_path}")
-        print(f"Epoch: {metadata.get('epoch', 'unknown')}, Loss: {metadata.get('loss', 'unknown')}")
-
         return metadata
 
     def _cleanup_old_checkpoints(self):
@@ -206,7 +204,6 @@ class CheckpointManager:
         for ckpt in self.checkpoints:
             if str(ckpt['path']) not in keep_files:
                 ckpt['path'].unlink()
-                print(f"Removed old checkpoint: {ckpt['path']}")
 
     def list_checkpoints(self) -> list:
         """List all available checkpoints."""

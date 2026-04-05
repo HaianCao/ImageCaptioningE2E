@@ -121,17 +121,33 @@ def compute_multilabel_metrics(
         average: F1 averaging method ('macro', 'micro', 'weighted')
 
     Returns:
-        Dict with accuracy and F1
+        Dict with exact-match accuracy, sample-wise accuracy, and F1
     """
-    # Convert to binary predictions
-    pred_binary = (preds.sigmoid() > threshold).int()
+    if isinstance(preds, torch.Tensor):
+        pred_tensor = preds.detach().cpu()
+    else:
+        pred_tensor = torch.as_tensor(preds)
+
+    # Accept either logits or already-binarized predictions.
+    if pred_tensor.dtype.is_floating_point and pred_tensor.numel() > 0:
+        if pred_tensor.min() >= 0.0 and pred_tensor.max() <= 1.0:
+            pred_binary = (pred_tensor > threshold).int()
+        else:
+            pred_binary = (pred_tensor.sigmoid() > threshold).int()
+    else:
+        pred_binary = pred_tensor.int()
 
     # Convert to numpy
     pred_np = pred_binary.cpu().numpy()
     target_np = targets.cpu().numpy().astype(int)
 
+    exact_match_accuracy = float(accuracy_score(target_np, pred_np))
+    sample_accuracy = float((pred_np == target_np).mean(axis=1).mean()) if pred_np.size else 0.0
+
     return {
-        'accuracy': float(accuracy_score(target_np, pred_np)),
+        'accuracy': exact_match_accuracy,
+        'exact_match_accuracy': exact_match_accuracy,
+        'sample_accuracy': sample_accuracy,
         'f1': float(f1_score(target_np, pred_np, average=average, zero_division=0)),
     }
 

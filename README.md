@@ -23,7 +23,9 @@ cd ImageCaptioningE2E
 
 2. Open and run [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb).
 
-3. Edit the YAML configs, not the notebook, for the main runtime controls.
+3. Open [notebooks/01_eda.ipynb](notebooks/01_eda.ipynb) when you want to inspect the dataset before training.
+
+4. Edit the YAML configs, not the notebook, for the main runtime controls.
 
 Key settings:
 
@@ -70,9 +72,7 @@ prj/
 ├── logs/
 ├── notebooks/
 │   ├── complete_pipeline.ipynb
-│   ├── 00_setup_and_download.ipynb
-│   ├── task1_train.ipynb
-│   └── task2_train.ipynb
+│   └── 01_eda.ipynb
 └── src/
     ├── data/
     ├── evaluation/
@@ -93,9 +93,18 @@ prj/
 | ViT-Base/16 | `vit_base_16` |
 | ViT-Large/16 | `vit_large_16` |
 
+## Model Behavior
+
+- `ObjectClassifier` is a single-label classifier: each ROI predicts exactly one object class with a softmax / cross-entropy head.
+- `AttributeClassifier` is a multi-label classifier: each ROI can activate multiple attributes at once with a sigmoid / BCE head.
+- The attribute output dimension is fixed by the attribute vocabulary size, but the number of active labels can vary per object.
+- `RelationClassifier` is also single-label over the relation vocabulary.
+
 ## Notes
 
-- Task 1 uses configurable MLP heads for object and attribute classification.
+- Task 1 uses configurable MLP heads for object and attribute prediction; object classification is single-label, while attribute prediction is multi-label and the number of active attributes can vary per object.
+- Task 1 evaluation reports exact-match accuracy and sample-wise accuracy for attributes, plus F1.
 - Task 2 uses a configurable relation classifier with `concat`, `attention`, or `gated` fusion.
+- `01_eda.ipynb` is the lightweight notebook for dataset inspection and plotting.
 - Feature caches are stored under each task's processed directory in a relative `features/` folder.
 - See [requirements.txt](requirements.txt) for the full dependency list.

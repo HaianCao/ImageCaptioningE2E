@@ -206,7 +206,7 @@ class BaseTrainer(ABC):
             self.global_step += 1
 
             # Log batch
-            if batch_idx % self.log_every_n_steps == 0:
+            if self.log_every_n_steps > 0 and batch_idx % self.log_every_n_steps == 0:
                 self._log_batch(batch, loss.item(), batch_idx)
 
         return {

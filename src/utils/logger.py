@@ -118,7 +118,10 @@ class Logger:
         # Console
         metrics_str = ", ".join(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
                                for k, v in metrics.items())
-        self.info(f"Step {step}: {metrics_str}")
+        if prefix == "epoch":
+            self.info(f"Epoch {step + 1}: {metrics_str}")
+        else:
+            self.info(f"Step {step}: {metrics_str}")
 
     def log_image(self, tag: str, image, step: int):
         """
