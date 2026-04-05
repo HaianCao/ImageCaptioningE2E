@@ -14,6 +14,7 @@ from .trainer import BaseTrainer
 from ..models.task1 import ObjectClassifier, AttributeClassifier
 from ..evaluation import compute_classification_metrics, compute_multilabel_metrics
 from ..utils import CheckpointManager
+from ..utils.memory import cleanup_cuda_memory
 
 
 class Task1Trainer(BaseTrainer):
@@ -81,6 +82,12 @@ class Task1Trainer(BaseTrainer):
 
         # Move attribute model to device
         self.attribute_model.to(self.device)
+
+    def train(self) -> Dict[str, Any]:
+        try:
+            return super().train()
+        finally:
+            cleanup_cuda_memory(note="Task 1 training finished")
 
     def _train_epoch(self) -> Dict[str, float]:
         """Train for one epoch with separate optimizers for object and attribute heads."""

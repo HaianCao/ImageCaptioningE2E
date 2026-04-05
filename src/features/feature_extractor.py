@@ -15,6 +15,7 @@ from PIL import Image
 import torchvision.transforms as T
 
 from .roi_extractor import extract_roi, extract_union_roi
+from ..utils.memory import cleanup_cuda_memory
 
 
 class FeatureExtractor(nn.Module):
@@ -244,6 +245,9 @@ def extract_task1_features(
     torch.save(all_features, output_path)
     print(f"Saved {len(all_features)} features to {output_path}")
 
+    del extractor
+    cleanup_cuda_memory(note=f"Task 1 feature extraction finished: {output_path.name}")
+
 
 def extract_task2_features(
     annotation_file: str,
@@ -317,6 +321,9 @@ def extract_task2_features(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(all_features, output_path)
     print(f"Saved {len(all_features)} features to {output_path}")
+
+    del extractor
+    cleanup_cuda_memory(note=f"Task 2 feature extraction finished: {output_path.name}")
 
 
 if __name__ == "__main__":

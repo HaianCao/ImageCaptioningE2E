@@ -48,7 +48,7 @@ loss:
 
 # ── Training Overrides ─────────────────────────────────────
 training:
-  batch_size: 64  # Batch size used by Task 2 DataLoaders
+  batch_size: 512  # Batch size used by Task 2 DataLoaders
   max_epochs: 35  # Maximum Task 2 training epochs
   lr: 3.0e-4  # Learning rate for Task 2 optimizer
 

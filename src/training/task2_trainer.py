@@ -13,6 +13,7 @@ from .trainer import BaseTrainer
 from ..models.task2 import RelationClassifier
 from ..evaluation import compute_classification_metrics
 from ..utils import CheckpointManager
+from ..utils.memory import cleanup_cuda_memory
 
 
 class Task2Trainer(BaseTrainer):
@@ -48,6 +49,12 @@ class Task2Trainer(BaseTrainer):
         )
 
         self.label_smoothing = label_smoothing
+
+    def train(self) -> Dict[str, Any]:
+        try:
+            return super().train()
+        finally:
+            cleanup_cuda_memory(note="Task 2 training finished")
 
     def _compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Compute loss for relationship classification."""
