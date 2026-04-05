@@ -188,9 +188,9 @@ class CaptionGenerator:
         if relation_source is None:
             relation_source = task2_results.get("relation_pred")
 
-        attribute_source = task1_results.get("attribute_preds")
+        attribute_source = task1_results.get("attribute_logits")
         if attribute_source is None:
-            attribute_source = task1_results.get("attribute_logits")
+            attribute_source = task1_results.get("attribute_preds")
 
         obj_pred = self._decode_class_prediction(object_source)
         rel_pred = self._decode_class_prediction(relation_source)

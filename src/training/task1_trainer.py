@@ -39,6 +39,12 @@ class Task1Trainer(BaseTrainer):
         attribute_pos_weight: Optional[torch.Tensor] = None,
         checkpoint_manager: Optional[CheckpointManager] = None,
         attribute_checkpoint_manager: Optional[CheckpointManager] = None,
+        *,
+        attribute_threshold_mode: str = "adaptive_mean_std",
+        attribute_threshold: float = 0.5,
+        attribute_threshold_scale: float = 0.5,
+        attribute_threshold_min: float = 0.05,
+        attribute_threshold_max: float = 0.95,
         **kwargs
     ):
         if checkpoint_manager is None:
@@ -79,6 +85,13 @@ class Task1Trainer(BaseTrainer):
         self.attribute_pos_weight = attribute_pos_weight
         if self.attribute_pos_weight is not None:
             self.attribute_pos_weight = self.attribute_pos_weight.to(self.device)
+
+        # Attribute evaluation thresholds
+        self.attribute_threshold_mode = attribute_threshold_mode
+        self.attribute_threshold = attribute_threshold
+        self.attribute_threshold_scale = attribute_threshold_scale
+        self.attribute_threshold_min = attribute_threshold_min
+        self.attribute_threshold_max = attribute_threshold_max
 
         # Move attribute model to device
         self.attribute_model.to(self.device)
@@ -176,7 +189,6 @@ class Task1Trainer(BaseTrainer):
             attribute_logits = self.attribute_model(features)
 
         object_preds = object_logits.argmax(dim=1)
-        attribute_preds = (attribute_logits.sigmoid() > 0.5).long()
 
         object_targets = batch['object_label']
         attribute_targets = batch['attribute_labels']
@@ -184,7 +196,7 @@ class Task1Trainer(BaseTrainer):
         return {
             'object_preds': object_preds,
             'object_targets': object_targets,
-            'attribute_preds': attribute_preds,
+            'attribute_logits': attribute_logits,
             'attribute_targets': attribute_targets
         }, None  # targets already included in preds dict
 
@@ -193,7 +205,7 @@ class Task1Trainer(BaseTrainer):
         # Aggregate predictions
         object_preds = torch.cat([p['object_preds'] for p in all_preds])
         object_targets = torch.cat([p['object_targets'] for p in all_preds])
-        attribute_preds = torch.cat([p['attribute_preds'] for p in all_preds])
+        attribute_logits = torch.cat([p['attribute_logits'] for p in all_preds])
         attribute_targets = torch.cat([p['attribute_targets'] for p in all_preds])
 
         # Object metrics
@@ -203,7 +215,13 @@ class Task1Trainer(BaseTrainer):
 
         # Attribute metrics (multi-label)
         attribute_metrics = compute_multilabel_metrics(
-            attribute_preds.float(), attribute_targets.float()
+            attribute_logits,
+            attribute_targets,
+            threshold=self.attribute_threshold,
+            threshold_mode=self.attribute_threshold_mode,
+            threshold_scale=self.attribute_threshold_scale,
+            threshold_min=self.attribute_threshold_min,
+            threshold_max=self.attribute_threshold_max,
         )
 
         # Combine metrics with prefixes
@@ -213,14 +231,21 @@ class Task1Trainer(BaseTrainer):
 
         if 'exact_match_accuracy' in attribute_metrics:
             metrics['attribute_exact_match_accuracy'] = attribute_metrics['exact_match_accuracy']
-        elif 'accuracy' in attribute_metrics:
-            metrics['attribute_exact_match_accuracy'] = attribute_metrics['accuracy']
 
-        if 'sample_accuracy' in attribute_metrics:
-            metrics['attribute_sample_accuracy'] = attribute_metrics['sample_accuracy']
+        if 'sample_accuracy_mean' in attribute_metrics:
+            metrics['attribute_sample_accuracy_mean'] = attribute_metrics['sample_accuracy_mean']
 
-        if 'f1' in attribute_metrics:
-            metrics['attribute_f1'] = attribute_metrics['f1']
+        if 'sample_accuracy_variance' in attribute_metrics:
+            metrics['attribute_sample_accuracy_variance'] = attribute_metrics['sample_accuracy_variance']
+
+        if 'sample_f1' in attribute_metrics:
+            metrics['attribute_sample_f1'] = attribute_metrics['sample_f1']
+
+        if 'jaccard_index' in attribute_metrics:
+            metrics['attribute_jaccard_index'] = attribute_metrics['jaccard_index']
+
+        if 'hamming_loss' in attribute_metrics:
+            metrics['attribute_hamming_loss'] = attribute_metrics['hamming_loss']
 
         return metrics
 
@@ -269,7 +294,7 @@ class Task1Trainer(BaseTrainer):
                 optimizer=self.attribute_optimizer,
                 epoch=epoch,
                 loss=metrics.get('train_loss', 0),
-                metric=metrics.get('attribute_f1', 0),
+                metric=metrics.get('attribute_sample_f1', 0),
                 task="task1_attribute",
                 filename=f"task1_attribute_epoch_{epoch}.pth"
             )

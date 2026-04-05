@@ -67,4 +67,8 @@ augmentation:
 # ── Evaluation ─────────────────────────────────────────────
 eval:
   object_top_k: [1, 3, 5]  # Top-k values reported for object accuracy
+  attribute_threshold_mode: "fixed"  # Use a fixed sigmoid threshold for attributes
   attribute_threshold: 0.5    # Sigmoid threshold for converting attribute logits to labels
+  attribute_threshold_scale: 0.5  # Kept for compatibility; unused in fixed mode
+  attribute_threshold_min: 0.05   # Kept for compatibility; unused in fixed mode
+  attribute_threshold_max: 0.95   # Kept for compatibility; unused in fixed mode

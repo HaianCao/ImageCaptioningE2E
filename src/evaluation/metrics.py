@@ -8,7 +8,7 @@ so the primary metrics here are accuracy and F1.
 import torch
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, hamming_loss
 
 
 def compute_classification_metrics(
@@ -109,7 +109,12 @@ def compute_multilabel_metrics(
     preds: torch.Tensor,
     targets: torch.Tensor,
     threshold: float = 0.5,
-    average: str = 'macro'
+    average: str = 'macro',
+    *,
+    threshold_mode: str = 'adaptive_mean_std',
+    threshold_scale: float = 0.5,
+    threshold_min: float = 0.05,
+    threshold_max: float = 0.95,
 ) -> Dict[str, float]:
     """
     Compute multi-label classification metrics.
@@ -117,38 +122,101 @@ def compute_multilabel_metrics(
     Args:
         preds: Predicted logits (N, num_attributes)
         targets: Ground truth binary labels (N, num_attributes)
-        threshold: Threshold for positive predictions
-        average: F1 averaging method ('macro', 'micro', 'weighted')
+        threshold: Base threshold for fixed mode
+        threshold_mode: "adaptive_mean_std" for per-sample thresholding or "fixed"
+        threshold_scale: How strongly to adjust the threshold with per-sample std
+        threshold_min: Lower bound for adaptive thresholds
+        threshold_max: Upper bound for adaptive thresholds
+        average: Kept for backward compatibility; not used by the sample metrics
 
     Returns:
-        Dict with exact-match accuracy, sample-wise accuracy, and F1
+        Dict with exact-match accuracy, sample-wise accuracy summary,
+        sample F1, Jaccard, and Hamming loss.
     """
     if isinstance(preds, torch.Tensor):
         pred_tensor = preds.detach().cpu()
     else:
         pred_tensor = torch.as_tensor(preds)
 
-    # Accept either logits or already-binarized predictions.
-    if pred_tensor.dtype.is_floating_point and pred_tensor.numel() > 0:
-        if pred_tensor.min() >= 0.0 and pred_tensor.max() <= 1.0:
-            pred_binary = (pred_tensor > threshold).int()
+    if isinstance(targets, torch.Tensor):
+        target_tensor = targets.detach().cpu()
+    else:
+        target_tensor = torch.as_tensor(targets)
+
+    if pred_tensor.ndim == 1:
+        pred_tensor = pred_tensor.unsqueeze(0)
+    if target_tensor.ndim == 1:
+        target_tensor = target_tensor.unsqueeze(0)
+
+    if pred_tensor.numel() == 0 or target_tensor.numel() == 0:
+        return {
+            'exact_match_accuracy': 0.0,
+            'sample_accuracy_mean': 0.0,
+            'sample_accuracy_variance': 0.0,
+            'sample_f1': 0.0,
+            'jaccard_index': 0.0,
+            'hamming_loss': 0.0,
+        }
+
+    if pred_tensor.shape != target_tensor.shape:
+        raise ValueError(
+            f"Shape mismatch for multilabel metrics: preds={tuple(pred_tensor.shape)} vs targets={tuple(target_tensor.shape)}"
+        )
+
+    # Accept either logits/probabilities or already-binarized predictions.
+    if pred_tensor.dtype.is_floating_point and torch.all((pred_tensor == 0) | (pred_tensor == 1)).item():
+        pred_binary = pred_tensor.int()
+    elif pred_tensor.dtype.is_floating_point:
+        pred_scores = pred_tensor.sigmoid() if (pred_tensor.min().item() < 0.0 or pred_tensor.max().item() > 1.0) else pred_tensor.float()
+        mode = (threshold_mode or 'fixed').lower()
+
+        if mode in {'fixed', 'static'}:
+            pred_binary = (pred_scores >= threshold).int()
+        elif mode in {'adaptive_mean_std', 'dynamic', 'adaptive'}:
+            sample_mean = pred_scores.mean(dim=1, keepdim=True)
+            sample_std = pred_scores.std(dim=1, unbiased=False, keepdim=True)
+            adaptive_threshold = sample_mean - (threshold_scale * sample_std)
+            adaptive_threshold = torch.clamp(adaptive_threshold, min=threshold_min, max=threshold_max)
+            pred_binary = (pred_scores >= adaptive_threshold).int()
+        elif mode in {'adaptive_mean', 'mean'}:
+            adaptive_threshold = torch.clamp(
+                pred_scores.mean(dim=1, keepdim=True),
+                min=threshold_min,
+                max=threshold_max,
+            )
+            pred_binary = (pred_scores >= adaptive_threshold).int()
         else:
-            pred_binary = (pred_tensor.sigmoid() > threshold).int()
+            raise ValueError(
+                f"Unsupported threshold_mode='{threshold_mode}'. Use 'fixed' or 'adaptive_mean_std'."
+            )
     else:
         pred_binary = pred_tensor.int()
 
-    # Convert to numpy
-    pred_np = pred_binary.cpu().numpy()
-    target_np = targets.cpu().numpy().astype(int)
+    pred_np = pred_binary.cpu().numpy().astype(int)
+    target_np = target_tensor.cpu().numpy().astype(int)
 
     exact_match_accuracy = float(accuracy_score(target_np, pred_np))
-    sample_accuracy = float((pred_np == target_np).mean(axis=1).mean()) if pred_np.size else 0.0
+    sample_accuracy_per_row = (pred_np == target_np).mean(axis=1) if pred_np.size else np.array([])
+    sample_accuracy_mean = float(sample_accuracy_per_row.mean()) if sample_accuracy_per_row.size else 0.0
+    sample_accuracy_variance = float(sample_accuracy_per_row.var(ddof=0)) if sample_accuracy_per_row.size else 0.0
+
+    intersection = np.logical_and(pred_np, target_np).sum(axis=1) if pred_np.size else np.array([])
+    pred_count = pred_np.sum(axis=1) if pred_np.size else np.array([])
+    target_count = target_np.sum(axis=1) if target_np.size else np.array([])
+
+    f1_denominator = pred_count + target_count
+    sample_f1 = np.where(f1_denominator == 0, 1.0, (2.0 * intersection) / f1_denominator)
+
+    union = np.logical_or(pred_np, target_np).sum(axis=1) if pred_np.size else np.array([])
+    jaccard = np.where(union == 0, 1.0, intersection / union)
 
     return {
-        'accuracy': exact_match_accuracy,
         'exact_match_accuracy': exact_match_accuracy,
-        'sample_accuracy': sample_accuracy,
-        'f1': float(f1_score(target_np, pred_np, average=average, zero_division=0)),
+        'sample_accuracy_mean': sample_accuracy_mean,
+        'sample_accuracy_variance': sample_accuracy_variance,
+        'sample_f1': float(sample_f1.mean()) if sample_f1.size else 0.0,
+        'jaccard_index': float(jaccard.mean()) if jaccard.size else 0.0,
+        'hamming_loss': float(hamming_loss(target_np, pred_np)),
     }
 
 

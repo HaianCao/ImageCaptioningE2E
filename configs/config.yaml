@@ -71,10 +71,10 @@ sampling:
   sample_size: 10000  # Number of image IDs to select in strict sample mode
   split_ratios: [0.8, 0.1, 0.1]  # Train/val/test ratios for the sampled image set
   seed: 42  # Seed for deterministic sampling and split assignment
-  image_download_mode: "all"  # Image download policy: "none", "sample", or "all"
+  image_download_mode: "sample"  # Image download policy: "none", "sample", or "all"
   max_samples: null  # Optional per-split sample cap for fast debugging
 
 feature_extraction:
-  batch_size: 512  # Batch size used during feature extraction
+  batch_size: 700  # Batch size used during feature extraction
   resize_size: 256  # Resize size before center crop
   crop_size: 224  # Final crop size fed to the backbone
