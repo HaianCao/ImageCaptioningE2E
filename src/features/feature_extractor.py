@@ -6,6 +6,7 @@ Supports various backbones: ResNet, EfficientNet, ViT.
 
 import torch
 import torch.nn as nn
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Union, Tuple
 from tqdm import tqdm
@@ -64,6 +65,7 @@ class FeatureExtractor(nn.Module):
 
         self.backbone_name = backbone
         self.device = device
+        self.use_amp = str(device).startswith("cuda")
 
         # Create backbone
         if backbone.startswith("resnet"):
@@ -123,8 +125,11 @@ class FeatureExtractor(nn.Module):
         else:
             batch = images.to(self.device)
 
-        features = self.backbone(batch)
-        return features.cpu()
+        amp_context = torch.amp.autocast(device_type="cuda") if self.use_amp else nullcontext()
+        with amp_context:
+            features = self.backbone(batch)
+
+        return features.float().cpu()
 
     def extract_roi_features(
         self,

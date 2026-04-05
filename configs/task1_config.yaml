@@ -43,11 +43,11 @@ model:
 loss:
   object_weight: 1.0          # Weight applied to object classification loss
   attribute_weight: 1.0       # Weight applied to attribute classification loss
-  attribute_pos_weight: 5.0   # Positive-class weight for the attribute BCE loss
+  attribute_pos_weight: 5.0   # Legacy scalar; auto class balancing now derives the actual attribute BCE weights from the train split
 
 # ── Training Overrides ─────────────────────────────────────
 training:
-  batch_size: 512  # Batch size used by Task 1 DataLoaders
+  batch_size: 1024  # Batch size used by Task 1 DataLoaders; cached features make larger batches feasible
   max_epochs: 40  # Maximum Task 1 training epochs
   lr: 5.0e-4  # Learning rate for Task 1 optimizers
 

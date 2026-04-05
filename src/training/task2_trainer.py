@@ -13,6 +13,7 @@ from .trainer import BaseTrainer
 from ..models.task2 import RelationClassifier
 from ..evaluation import compute_classification_metrics
 from ..utils import CheckpointManager
+from ..utils.class_balance import compute_single_label_class_weights
 from ..utils.memory import cleanup_cuda_memory
 
 
@@ -31,6 +32,7 @@ class Task2Trainer(BaseTrainer):
         optimizer: torch.optim.Optimizer,
         label_smoothing: float = 0.0,
         checkpoint_manager: Optional[CheckpointManager] = None,
+        use_auto_class_weights: bool = True,
         **kwargs
     ):
         if checkpoint_manager is None:
@@ -49,6 +51,24 @@ class Task2Trainer(BaseTrainer):
         )
 
         self.label_smoothing = label_smoothing
+        self.use_auto_class_weights = use_auto_class_weights
+        self.class_weights = None
+
+        if self.use_auto_class_weights:
+            self.class_weights = compute_single_label_class_weights(
+                self.train_loader.dataset,
+                num_classes=self.model.num_relations,
+                label_key="relation_label",
+                power=0.5,
+                clip_min=0.25,
+                clip_max=10.0,
+                device=self.device,
+            )
+
+        if self.class_weights is not None:
+            self.logger.info(
+                f"Task 2 auto class balancing enabled | weight mean={self.class_weights.mean().item():.3f}"
+            )
 
     def train(self) -> Dict[str, Any]:
         try:
@@ -66,7 +86,12 @@ class Task2Trainer(BaseTrainer):
         logits = self.model(features, spatial)
 
         # Cross-entropy loss
-        loss = nn.functional.cross_entropy(logits, targets, label_smoothing=self.label_smoothing)
+        loss = nn.functional.cross_entropy(
+            logits,
+            targets,
+            weight=self.class_weights,
+            label_smoothing=self.label_smoothing,
+        )
 
         return loss
 

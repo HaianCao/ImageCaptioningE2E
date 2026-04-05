@@ -14,6 +14,7 @@ from .trainer import BaseTrainer
 from ..models.task1 import ObjectClassifier, AttributeClassifier
 from ..evaluation import compute_classification_metrics, compute_multilabel_metrics
 from ..utils import CheckpointManager
+from ..utils.class_balance import compute_single_label_class_weights, compute_multilabel_pos_weight
 from ..utils.memory import cleanup_cuda_memory
 
 
@@ -39,6 +40,7 @@ class Task1Trainer(BaseTrainer):
         attribute_pos_weight: Optional[torch.Tensor] = None,
         checkpoint_manager: Optional[CheckpointManager] = None,
         attribute_checkpoint_manager: Optional[CheckpointManager] = None,
+        use_auto_class_weights: bool = True,
         *,
         attribute_threshold_mode: str = "adaptive_mean_std",
         attribute_threshold: float = 0.5,
@@ -81,10 +83,44 @@ class Task1Trainer(BaseTrainer):
         self.object_weight = object_weight
         self.attribute_weight = attribute_weight
 
-        # For imbalanced attributes
-        self.attribute_pos_weight = attribute_pos_weight
+        # Automatic class balancing derived from the training split.
+        self.use_auto_class_weights = use_auto_class_weights
+        self.object_class_weight = None
+        self.attribute_pos_weight = None
+
+        if self.use_auto_class_weights:
+            self.object_class_weight = compute_single_label_class_weights(
+                self.train_loader.dataset,
+                num_classes=self.object_model.num_classes,
+                label_key="object_label",
+                power=0.5,
+                clip_min=0.25,
+                clip_max=10.0,
+                device=self.device,
+            )
+            self.attribute_pos_weight = compute_multilabel_pos_weight(
+                self.train_loader.dataset,
+                num_labels=self.attribute_model.num_attributes,
+                label_key="attribute_labels",
+                power=0.5,
+                clip_min=1.0,
+                clip_max=20.0,
+                device=self.device,
+            )
+        else:
+            if attribute_pos_weight is not None:
+                self.attribute_pos_weight = attribute_pos_weight.to(self.device)
+
+        if self.object_class_weight is not None:
+            self.logger.info(
+                f"Task 1 auto class balancing enabled | object weight mean={self.object_class_weight.mean().item():.3f}"
+            )
         if self.attribute_pos_weight is not None:
-            self.attribute_pos_weight = self.attribute_pos_weight.to(self.device)
+            self.logger.info(
+                f"Task 1 auto attribute balancing enabled | pos_weight mean={self.attribute_pos_weight.mean().item():.3f}"
+            )
+            if attribute_pos_weight is not None and self.use_auto_class_weights:
+                self.logger.info("Task 1 manual attribute_pos_weight input is ignored because auto balancing is enabled.")
 
         # Attribute evaluation thresholds
         self.attribute_threshold_mode = attribute_threshold_mode
@@ -118,7 +154,7 @@ class Task1Trainer(BaseTrainer):
             self.attribute_optimizer.zero_grad()
 
             if self.use_amp:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast(device_type="cuda"):
                     loss = self._compute_loss(batch)
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
@@ -157,7 +193,11 @@ class Task1Trainer(BaseTrainer):
         # Object classification loss
         object_logits = self.object_model(features)
         object_targets = batch['object_label']
-        object_loss = nn.functional.cross_entropy(object_logits, object_targets)
+        object_loss = nn.functional.cross_entropy(
+            object_logits,
+            object_targets,
+            weight=self.object_class_weight,
+        )
 
         # Attribute classification loss (multi-label)
         attribute_logits = self.attribute_model(features)
@@ -259,11 +299,15 @@ class Task1Trainer(BaseTrainer):
             attribute_logits = self.attribute_model(features)
 
         object_loss = nn.functional.cross_entropy(
-            object_logits, batch['object_label']
+            object_logits,
+            batch['object_label'],
+            weight=self.object_class_weight,
         ).item()
 
         attribute_loss = nn.functional.binary_cross_entropy_with_logits(
-            attribute_logits, batch['attribute_labels'].float()
+            attribute_logits,
+            batch['attribute_labels'].float(),
+            pos_weight=self.attribute_pos_weight,
         ).item()
 
         self.logger.log_metrics({

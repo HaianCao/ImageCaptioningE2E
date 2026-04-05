@@ -205,10 +205,12 @@ def compute_multilabel_metrics(
     target_count = target_np.sum(axis=1) if target_np.size else np.array([])
 
     f1_denominator = pred_count + target_count
-    sample_f1 = np.where(f1_denominator == 0, 1.0, (2.0 * intersection) / f1_denominator)
+    sample_f1 = np.ones_like(f1_denominator, dtype=np.float32)
+    np.divide(2.0 * intersection, f1_denominator, out=sample_f1, where=f1_denominator != 0)
 
     union = np.logical_or(pred_np, target_np).sum(axis=1) if pred_np.size else np.array([])
-    jaccard = np.where(union == 0, 1.0, intersection / union)
+    jaccard = np.ones_like(union, dtype=np.float32)
+    np.divide(intersection, union, out=jaccard, where=union != 0)
 
     return {
         'exact_match_accuracy': exact_match_accuracy,

@@ -35,8 +35,8 @@ split:
 
 # ── General Training ───────────────────────────────────────
 training:
-  batch_size: 512  # Default batch size for training DataLoaders
-  num_workers: 0  # Number of DataLoader worker processes
+  batch_size: 1024  # Default batch size for training DataLoaders
+  num_workers: 2  # Number of DataLoader worker processes; 2 is a safer Colab default than 0
   pin_memory: true  # Pin host memory to speed up CPU->GPU transfer
   max_epochs: 30  # Maximum number of training epochs
   early_stopping_patience: 5  # Stop after this many non-improving validation epochs
@@ -75,6 +75,6 @@ sampling:
   max_samples: null  # Optional per-split sample cap for fast debugging
 
 feature_extraction:
-  batch_size: 700  # Batch size used during feature extraction
+  batch_size: 1024  # Batch size used during feature extraction; AMP is enabled in code on CUDA
   resize_size: 256  # Resize size before center crop
   crop_size: 224  # Final crop size fed to the backbone

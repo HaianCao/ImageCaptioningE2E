@@ -6,6 +6,7 @@ Supports TensorBoard and Weights & Biases.
 
 import os
 import logging
+import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -76,9 +77,13 @@ class Logger:
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s [%(levelname)s] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            datefmt='%Y-%m-%d %H:%M:%S',
+            stream=sys.stdout,
+            force=True,
         )
         self.logger = logging.getLogger(self.experiment_name)
+        self.logger.setLevel(logging.INFO)
+        self.logger.propagate = True
 
     def info(self, message: str):
         """Log info message."""

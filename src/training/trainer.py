@@ -85,7 +85,7 @@ class BaseTrainer(ABC):
         self.should_stop = False
 
         # Mixed precision
-        self.scaler = torch.cuda.amp.GradScaler() if use_amp else None
+        self.scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
         # Move model to device
         self.model.to(device)
@@ -176,7 +176,7 @@ class BaseTrainer(ABC):
 
             # Forward pass with optional mixed precision
             if self.use_amp:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast(device_type="cuda"):
                     loss = self._compute_loss(batch)
             else:
                 loss = self._compute_loss(batch)
