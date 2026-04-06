@@ -68,7 +68,7 @@ model:
   # Hidden width of the relation MLP head after the visual/spatial fusion step.
   hidden_dim: 1024
   # Dropout rate used inside the relation head.
-  dropout: 0.4
+  dropout: 0.2
   # Number of linear layers in the relation head.
   # 1 means a single linear classifier on top of the fused representation.
   num_layers: 2

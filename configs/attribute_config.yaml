@@ -56,7 +56,7 @@ model:
   # Hidden width of the attribute multilabel MLP head.
   attribute_hidden_dim: 512
   # Dropout rate used inside the attribute head.
-  attribute_dropout: 0.1
+  attribute_dropout: 0.2
   # Number of linear layers in the attribute head.
   # 1 means a single linear classifier on top of the encoder output.
   attribute_num_layers: 2

@@ -56,7 +56,7 @@ model:
   # Hidden width of the object classification MLP head.
   object_hidden_dim: 512
   # Dropout rate used inside the object head.
-  object_dropout: 0.3
+  object_dropout: 0.2
   # Number of linear layers in the object head.
   # 1 means a single linear classifier on top of the encoder output.
   object_num_layers: 2
@@ -71,7 +71,7 @@ loss:
 training:
   # Batch size used by the object DataLoader.
   # Increase it if your GPU memory allows; reduce it for smaller cards.
-  batch_size: 512
+  batch_size: 256
   # Number of DataLoader workers for object training.
   num_workers: 2
   # Pin host memory only when CUDA is available.
