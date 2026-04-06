@@ -88,7 +88,7 @@ training:
   # Increase it if your GPU memory allows; reduce it for smaller cards.
   batch_size: 256
   # Number of DataLoader workers for relation training.
-  num_workers: 2
+  num_workers: 0
   # Pin host memory only when CUDA is available.
   pin_memory: true
   # Maximum number of training epochs.
