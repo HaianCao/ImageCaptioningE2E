@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union, Callable
 from abc import ABC, abstractmethod
 
+try:
+    from tqdm.auto import tqdm
+except Exception:  # pragma: no cover - tqdm is a runtime convenience
+    tqdm = None
+
 from ..utils import Logger, CheckpointManager
 from ..evaluation import compute_classification_metrics, compute_multilabel_metrics
 
@@ -48,6 +53,9 @@ class BaseTrainer(ABC):
         use_amp: bool = False,  # Mixed precision
         log_every_n_steps: int = 50,
         save_every_n_epochs: int = 1,
+        use_tqdm: bool = True,
+        tqdm_leave: bool = False,
+        tqdm_position: int = 0,
         # Validation
         validate_every_n_epochs: int = 1,
         monitor_metric: str = "val_loss",
@@ -71,6 +79,9 @@ class BaseTrainer(ABC):
         self.use_amp = bool(use_amp and str(self.device).startswith("cuda") and torch.cuda.is_available())
         self.log_every_n_steps = log_every_n_steps
         self.save_every_n_epochs = save_every_n_epochs
+        self.use_tqdm = bool(use_tqdm)
+        self.tqdm_leave = bool(tqdm_leave)
+        self.tqdm_position = int(tqdm_position)
 
         # Validation config
         self.validate_every_n_epochs = validate_every_n_epochs
@@ -89,6 +100,18 @@ class BaseTrainer(ABC):
 
         # Move model to device
         self.model.to(self.device)
+
+    def _progress(self, iterable, *, desc: str, leave: Optional[bool] = None):
+        """Wrap an iterable with tqdm when progress bars are enabled."""
+        if self.use_tqdm and tqdm is not None:
+            return tqdm(
+                iterable,
+                desc=desc,
+                leave=self.tqdm_leave if leave is None else leave,
+                position=self.tqdm_position,
+                dynamic_ncols=True,
+            )
+        return iterable
 
     def train(self) -> Dict[str, Any]:
         """
@@ -229,7 +252,12 @@ class BaseTrainer(ABC):
         all_targets = []
 
         with torch.no_grad():
-            for batch in self.val_loader:
+            val_loader = self._progress(
+                self.val_loader,
+                desc=f"Epoch {self.current_epoch + 1}/{self.max_epochs} [val]",
+                leave=False,
+            )
+            for batch in val_loader:
                 batch = self._move_batch_to_device(batch)
 
                 # Compute loss

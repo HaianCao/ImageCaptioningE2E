@@ -121,7 +121,13 @@ class ObjectTrainer(BaseTrainer):
         epoch_loss = 0.0
         num_batches = 0
 
-        for batch_idx, batch in enumerate(self.train_loader):
+        train_loader = self._progress(
+            self.train_loader,
+            desc=f"Epoch {self.current_epoch + 1}/{self.max_epochs} [train]",
+            leave=False,
+        )
+
+        for batch_idx, batch in enumerate(train_loader):
             batch = self._move_batch_to_device(batch)
 
             self.optimizer.zero_grad()
