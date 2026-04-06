@@ -1,5 +1,5 @@
 """
-Dataset cho Task 1: Object & Attribute Classification.
+Dataset cho object/attribute classification.
 
 Mỗi sample là một ROI crop tương ứng với 1 object trong Visual Genome:
 - Input: Ảnh ROI đã crop từ bounding box
@@ -17,8 +17,44 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
+from PIL import Image
+
 from .dataset import BaseVGDataset, load_vocab, load_json
-from .transforms import get_train_transforms, get_val_transforms
+from .transforms import get_object_train_transforms, get_val_transforms
+
+
+def _normalize_object_input_mode(input_mode: str) -> str:
+    mode = str(input_mode).lower().strip()
+    aliases = {
+        "grayscale": "gray",
+        "grey": "gray",
+        "edge": "contour",
+        "edges": "contour",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in {"rgb", "gray", "contour"}:
+        raise ValueError("object_input_mode phải là 'rgb', 'gray', hoặc 'contour'")
+    return mode
+
+
+def _prepare_input_image(image: Image.Image, input_mode: str) -> Image.Image:
+    """Convert a cropped ROI into the requested input mode before augmentation."""
+    mode = _normalize_object_input_mode(input_mode)
+
+    if mode == "rgb":
+        return image.convert("RGB")
+
+    if mode == "gray":
+        return image.convert("L").convert("RGB")
+
+    if mode == "contour":
+        import cv2
+
+        gray_image = np.array(image.convert("L"))
+        edges = cv2.Canny(gray_image, 100, 200)
+        return Image.fromarray(edges).convert("RGB")
+
+    raise ValueError(f"Unsupported input_mode: {input_mode}")
 
 
 class ObjectAttributeDataset(BaseVGDataset):
@@ -57,6 +93,8 @@ class ObjectAttributeDataset(BaseVGDataset):
         attribute_vocab: Dict[str, int],
         transform=None,
         feature_cache_file: Optional[str] = None,
+        object_feature_cache_file: Optional[str] = None,
+        input_mode: str = "rgb",
         split: str = "train",
         max_samples: Optional[int] = None,
         cache_images: bool = False,
@@ -74,6 +112,8 @@ class ObjectAttributeDataset(BaseVGDataset):
         self.num_attributes = len(attribute_vocab)
         self.split = split
         self.feature_cache_file = feature_cache_file
+        self.object_feature_cache_file = object_feature_cache_file
+        self.input_mode = _normalize_object_input_mode(input_mode)
 
         # Load annotation
         self.annotation_file = Path(annotation_file)
@@ -81,24 +121,39 @@ class ObjectAttributeDataset(BaseVGDataset):
 
         # Load feature cache nếu có
         self._feature_cache: Optional[Dict] = None
+        self._object_feature_cache: Optional[Dict] = None
         self.cached_feature_dim: Optional[int] = None
+        self.cached_object_feature_dim: Optional[int] = None
         if feature_cache_file and Path(feature_cache_file).exists():
-            print(f"[Task1Dataset] Loading feature cache: {feature_cache_file}")
+            print(f"[ObjectAttributeDataset] Loading feature cache: {feature_cache_file}")
             self._feature_cache = torch.load(feature_cache_file, map_location="cpu")
             cache_size = len(self._feature_cache) if self._feature_cache is not None else 0
-            print(f"[Task1Dataset] Loaded {cache_size} cached features")
+            print(f"[ObjectAttributeDataset] Loaded {cache_size} cached features")
             if self._feature_cache:
                 first_feature = next(iter(self._feature_cache.values()))
                 if isinstance(first_feature, torch.Tensor) and first_feature.ndim >= 1:
                     self.cached_feature_dim = int(first_feature.shape[-1])
             else:
-                print(f"[Task1Dataset] Feature cache is empty; falling back to image mode")
+                print(f"[ObjectAttributeDataset] Feature cache is empty; falling back to image mode")
                 self._feature_cache = None
+
+        if object_feature_cache_file and Path(object_feature_cache_file).exists():
+            print(f"[ObjectAttributeDataset] Loading object feature cache: {object_feature_cache_file}")
+            self._object_feature_cache = torch.load(object_feature_cache_file, map_location="cpu")
+            object_cache_size = len(self._object_feature_cache) if self._object_feature_cache is not None else 0
+            print(f"[ObjectAttributeDataset] Loaded {object_cache_size} object cached features")
+            if self._object_feature_cache:
+                first_feature = next(iter(self._object_feature_cache.values()))
+                if isinstance(first_feature, torch.Tensor) and first_feature.ndim >= 1:
+                    self.cached_object_feature_dim = int(first_feature.shape[-1])
+            else:
+                print(f"[ObjectAttributeDataset] Object feature cache is empty; falling back to shared cache")
+                self._object_feature_cache = None
 
         # Giới hạn samples nếu cần
         if max_samples and max_samples < len(self.samples):
             self.samples = self.samples[:max_samples]
-            print(f"[Task1Dataset] Giới hạn {max_samples} samples (debug mode)")
+            print(f"[ObjectAttributeDataset] Giới hạn {max_samples} samples (debug mode)")
 
         print(self.summary())
 
@@ -112,7 +167,7 @@ class ObjectAttributeDataset(BaseVGDataset):
 
         raw = load_json(str(self.annotation_file))
         self.samples = raw if isinstance(raw, list) else raw.get("samples", [])
-        print(f"[Task1Dataset] Loaded {len(self.samples)} annotations từ {self.annotation_file}")
+        print(f"[ObjectAttributeDataset] Loaded {len(self.samples)} annotations từ {self.annotation_file}")
 
     def _make_attribute_vector(self, attribute_indices: List[int]) -> torch.Tensor:
         """
@@ -129,6 +184,24 @@ class ObjectAttributeDataset(BaseVGDataset):
             if 0 <= idx < self.num_attributes:
                 vec[idx] = 1.0
         return vec
+
+    def _get_cached_feature(
+        self,
+        cache: Optional[Dict],
+        sample: Dict,
+        fallback_idx: int,
+        fallback_dim: Optional[int],
+    ) -> Optional[torch.Tensor]:
+        if cache is None:
+            return None
+
+        key = str(sample.get("object_id", fallback_idx))
+        feature = cache.get(key)
+        if feature is None:
+            feature = cache.get(str(fallback_idx))
+        if feature is None and fallback_dim is not None:
+            feature = torch.zeros(fallback_dim, dtype=torch.float32)
+        return feature
 
     def __getitem__(self, idx: int) -> Dict:
         """
@@ -150,16 +223,34 @@ class ObjectAttributeDataset(BaseVGDataset):
         }
 
         # Chế độ feature cache
-        if self._feature_cache is not None:
-            key = str(sample.get("object_id", idx))
-            feature = self._feature_cache.get(key)
+        if self._feature_cache is not None or self._object_feature_cache is not None:
+            feature = self._get_cached_feature(
+                self._feature_cache,
+                sample,
+                idx,
+                self.cached_feature_dim or self.cached_object_feature_dim or 2048,
+            )
             if feature is None:
-                feature = self._feature_cache.get(str(idx))
-            if feature is None:
-                feature_dim = self.cached_feature_dim or 2048
-                feature = torch.zeros(feature_dim, dtype=torch.float32)
+                feature = self._get_cached_feature(
+                    self._object_feature_cache,
+                    sample,
+                    idx,
+                    self.cached_object_feature_dim or self.cached_feature_dim or 2048,
+                )
+
+            object_feature = self._get_cached_feature(
+                self._object_feature_cache,
+                sample,
+                idx,
+                self.cached_object_feature_dim or self.cached_feature_dim or 2048,
+            )
+            if object_feature is None:
+                object_feature = feature
+
             return {
                 "feature": feature,
+                "attribute_feature": feature,
+                "object_feature": object_feature,
                 "object_label": object_label,
                 "attribute_labels": attribute_labels,
                 "meta": meta,
@@ -168,7 +259,8 @@ class ObjectAttributeDataset(BaseVGDataset):
         # Chế độ image on-the-fly
         image = self._load_image(sample["image_id"])
         x, y, w, h = sample["bbox"]
-        roi = self._crop_roi(image, x, y, w, h, padding=5)
+        roi = self._crop_roi(image, x, y, w, h, padding=0)
+        roi = _prepare_input_image(roi, self.input_mode)
 
         if self.transform:
             roi = self.transform(roi)
@@ -197,6 +289,8 @@ def build_task1_datasets(
     roi_size: int = 224,
     use_feature_cache: bool = True,
     feature_cache_dir: Optional[str] = None,
+    input_mode: str = "rgb",
+    object_input_mode: Optional[str] = None,
     max_samples: Optional[int] = None,
     train_horizontal_flip_p: float = 0.5,
     train_color_jitter: bool = True,
@@ -229,15 +323,17 @@ def build_task1_datasets(
 
     mean = mean or [0.485, 0.456, 0.406]
     std = std or [0.229, 0.224, 0.225]
+    if object_input_mode is not None:
+        input_mode = object_input_mode
+    input_mode = _normalize_object_input_mode(input_mode)
 
     object_vocab = load_vocab(str(proc_path / "object_vocab.json"))
     attribute_vocab = load_vocab(str(proc_path / "attribute_vocab.json"))
 
-    train_transform = get_train_transforms(
+    train_transform = get_object_train_transforms(
         roi_size=roi_size,
         mean=mean,
         std=std,
-        resize_delta=train_resize_delta,
         horizontal_flip_p=train_horizontal_flip_p,
         color_jitter=train_color_jitter,
         brightness=train_brightness,
@@ -250,10 +346,16 @@ def build_task1_datasets(
 
     def _make_ds(split, transform):
         cache_file = None
+        object_cache_file = None
         if use_feature_cache:
-            cache_path = cache_root / f"{split}_features.pt"
-            if cache_path.exists():
-                cache_file = str(cache_path)
+            if input_mode == "rgb":
+                cache_path = cache_root / f"{split}_features.pt"
+                if cache_path.exists():
+                    cache_file = str(cache_path)
+            else:
+                object_cache_path = cache_root / f"{split}_{input_mode}_features.pt"
+                if object_cache_path.exists():
+                    object_cache_file = str(object_cache_path)
 
         return ObjectAttributeDataset(
             annotation_file=str(proc_path / split / "annotations.json"),
@@ -262,6 +364,8 @@ def build_task1_datasets(
             attribute_vocab=attribute_vocab,
             transform=transform,
             feature_cache_file=cache_file,
+            object_feature_cache_file=object_cache_file,
+            input_mode=input_mode,
             split=split,
             max_samples=max_samples,
         )

@@ -58,7 +58,7 @@ class BaseTrainer(ABC):
         self.val_loader = val_loader
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.device = device
+        self.device = device if not str(device).startswith("cuda") or torch.cuda.is_available() else "cpu"
 
         # Logging and checkpointing
         self.logger = logger or Logger()
@@ -68,7 +68,7 @@ class BaseTrainer(ABC):
         self.max_epochs = max_epochs
         self.early_stopping_patience = early_stopping_patience
         self.gradient_clip_val = gradient_clip_val
-        self.use_amp = use_amp
+        self.use_amp = bool(use_amp and str(self.device).startswith("cuda") and torch.cuda.is_available())
         self.log_every_n_steps = log_every_n_steps
         self.save_every_n_epochs = save_every_n_epochs
 
@@ -85,7 +85,7 @@ class BaseTrainer(ABC):
         self.should_stop = False
 
         # Mixed precision
-        self.scaler = torch.amp.GradScaler("cuda") if use_amp else None
+        self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
 
         # Move model to device
         self.model.to(device)

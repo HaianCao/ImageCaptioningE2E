@@ -1,13 +1,6 @@
-"""
-Models module for Visual Genome Caption Generation.
-
-Contains model definitions for:
-- Task 1: Object and attribute classification
-- Task 2: Relationship classification
-- Caption generation
-"""
+"""Models module for Visual Genome Caption Generation."""
 
 from .base_model import BaseModel
-from . import task1, task2, caption
+from . import caption, e2e, object, attribute, relation
 
-__all__ = ["BaseModel", "task1", "task2", "caption"]
+__all__ = ["BaseModel", "object", "attribute", "relation", "caption", "e2e"]

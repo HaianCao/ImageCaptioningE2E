@@ -12,6 +12,7 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 from tqdm import tqdm
 
 import timm
+import numpy as np
 from PIL import Image
 import torchvision.transforms as T
 
@@ -40,6 +41,20 @@ def _load_image_cached(
     return loaded_image
 
 
+def _normalize_input_mode(input_mode: str) -> str:
+    mode = str(input_mode).lower().strip()
+    aliases = {
+        "grayscale": "gray",
+        "grey": "gray",
+        "edge": "contour",
+        "edges": "contour",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in {"rgb", "gray", "contour"}:
+        raise ValueError("input_mode phải là 'rgb', 'gray', hoặc 'contour'")
+    return mode
+
+
 class FeatureExtractor(nn.Module):
     """
     Wrapper around pretrained vision backbones for feature extraction.
@@ -60,12 +75,16 @@ class FeatureExtractor(nn.Module):
         crop_size: int = 224,
         mean: Optional[List[float]] = None,
         std: Optional[List[float]] = None,
+        input_mode: str = "rgb",
+        preserve_full_roi: bool = False,
     ):
         super().__init__()
 
         self.backbone_name = backbone
         self.device = device
         self.use_amp = str(device).startswith("cuda")
+        self.input_mode = _normalize_input_mode(input_mode)
+        self.preserve_full_roi = preserve_full_roi
 
         # Create backbone
         if backbone.startswith("resnet"):
@@ -90,12 +109,35 @@ class FeatureExtractor(nn.Module):
         # Image preprocessing
         mean = mean or [0.485, 0.456, 0.406]
         std = std or [0.229, 0.224, 0.225]
-        self.transform = T.Compose([
-            T.Resize(resize_size),
-            T.CenterCrop(crop_size),
-            T.ToTensor(),
-            T.Normalize(mean=mean, std=std)
-        ])
+        if self.preserve_full_roi:
+            self.transform = T.Compose([
+                T.Resize((crop_size, crop_size)),
+                T.ToTensor(),
+                T.Normalize(mean=mean, std=std)
+            ])
+        else:
+            self.transform = T.Compose([
+                T.Resize(resize_size),
+                T.CenterCrop(crop_size),
+                T.ToTensor(),
+                T.Normalize(mean=mean, std=std)
+            ])
+
+    def _prepare_input_image(self, image: Image.Image) -> Image.Image:
+        if self.input_mode == "rgb":
+            return image.convert("RGB")
+
+        if self.input_mode == "gray":
+            return image.convert("L").convert("RGB")
+
+        if self.input_mode == "contour":
+            import cv2
+
+            gray_image = np.array(image.convert("L"))
+            edges = cv2.Canny(gray_image, 100, 200)
+            return Image.fromarray(edges).convert("RGB")
+
+        raise ValueError(f"Unsupported input_mode: {self.input_mode}")
 
     @torch.no_grad()
     def extract_features(self, images: Union[Image.Image, torch.Tensor, List]) -> torch.Tensor:
@@ -118,7 +160,7 @@ class FeatureExtractor(nn.Module):
             tensors = []
             for img in images:
                 if isinstance(img, Image.Image):
-                    tensors.append(self.transform(img))
+                    tensors.append(self.transform(self._prepare_input_image(img)))
                 else:
                     tensors.append(img)
             batch = torch.stack(tensors).to(self.device)
@@ -210,6 +252,7 @@ def extract_task1_features(
     crop_size: int = 224,
     mean: Optional[List[float]] = None,
     std: Optional[List[float]] = None,
+    input_mode: str = "rgb",
 ) -> None:
     """
     Pre-extract features for Task 1 dataset.
@@ -242,6 +285,8 @@ def extract_task1_features(
         crop_size=crop_size,
         mean=mean,
         std=std,
+        input_mode=input_mode,
+        preserve_full_roi=True,
     )
 
     # Process samples in batches across multiple images
@@ -291,6 +336,7 @@ def extract_task2_features(
     crop_size: int = 224,
     mean: Optional[List[float]] = None,
     std: Optional[List[float]] = None,
+    input_mode: str = "rgb",
 ) -> None:
     """
     Pre-extract features for Task 2 dataset.
@@ -323,6 +369,7 @@ def extract_task2_features(
         crop_size=crop_size,
         mean=mean,
         std=std,
+        input_mode=input_mode,
     )
 
     # Process samples in batches across multiple images
@@ -360,6 +407,21 @@ def extract_task2_features(
 
     del extractor
     cleanup_cuda_memory(note=f"Task 2 feature extraction finished: {output_path.name}")
+
+
+def extract_object_features(*args, **kwargs) -> None:
+    """Explicit alias for object feature extraction."""
+    return extract_task1_features(*args, **kwargs)
+
+
+def extract_attribute_features(*args, **kwargs) -> None:
+    """Explicit alias for attribute feature extraction."""
+    return extract_task1_features(*args, **kwargs)
+
+
+def extract_relation_features(*args, **kwargs) -> None:
+    """Explicit alias for relation feature extraction."""
+    return extract_task2_features(*args, **kwargs)
 
 
 if __name__ == "__main__":

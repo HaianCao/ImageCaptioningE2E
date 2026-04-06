@@ -1,0 +1,66 @@
+# ============================================================
+# Attribute Configuration
+# ============================================================
+
+task: "attribute"  # Explicit identifier for the attribute pipeline
+
+# ── Visual Backbone ────────────────────────────────────────
+# Options: "resnet50", "resnet101", "efficientnet_b3",
+#          "efficientnet_b5", "vit_base_16", "vit_large_16"
+backbone:
+  name: "resnet50"  # Backbone architecture used for feature extraction
+  pretrained: true  # Load pretrained weights for the backbone
+  learnable_backbone: true  # Attach the backbone directly inside the model when true
+  freeze_backbone: false  # Freeze backbone weights during training when true
+  freeze_epochs: 0  # Number of epochs to keep the backbone frozen before unfreezing
+  feature_dim: 2048  # Output feature dimension produced by the backbone
+
+# ── Dataset ────────────────────────────────────────────────
+dataset:
+  processed_dir: "data/processed/attribute"  # Processed attribute annotations and vocabularies
+  feature_cache_dir: "features"  # Relative cache folder for pre-extracted features
+  use_feature_cache: true  # Read cached features instead of raw images
+  attribute_input_mode: "rgb"  # Attribute pipeline input mode: rgb, gray, or contour
+
+# ── Label Space ────────────────────────────────────────────
+labels:
+  max_objects: 300  # Shared preprocessing cap for object/attribute vocabularies
+  max_attributes: 200  # Keep the top-N most frequent attribute labels
+
+# ── Model Architecture ─────────────────────────────────────
+model:
+  attribute_hidden_dim: 512  # Hidden width of the attribute multi-label MLP
+  attribute_dropout: 0.3  # Dropout rate used in the attribute head
+  attribute_num_layers: 2  # Number of linear layers in the attribute head
+
+# ── Loss Weights ───────────────────────────────────────────
+loss:
+  attribute_weight: 1.0  # Weight applied to attribute classification loss
+  attribute_pos_weight: 5.0  # Legacy scalar; auto class balancing now derives the actual BCE weights from the train split
+
+# ── Training Overrides ─────────────────────────────────────
+training:
+  batch_size: 512  # Batch size used by the attribute DataLoader; cached features make larger batches feasible
+  max_epochs: 40  # Maximum attribute training epochs
+  lr: 5.0e-4  # Learning rate for the attribute optimizer
+
+# ── Data Augmentation ──────────────────────────────────────
+augmentation:
+  resize_delta: 32  # Extra pixels added before random crop
+  random_horizontal_flip: 0.5  # Probability of horizontally flipping the ROI
+  color_jitter:
+    enabled: true  # Enable or disable color jitter
+    brightness: 0.2  # Brightness jitter magnitude
+    contrast: 0.2  # Contrast jitter magnitude
+    saturation: 0.2  # Saturation jitter magnitude
+    hue: 0.1  # Hue jitter magnitude
+  random_resized_crop: false  # Kept for compatibility; current pipeline uses fixed ROI crop
+  random_erasing_p: 0.0  # Probability of applying random erasing
+
+# ── Evaluation ─────────────────────────────────────────────
+eval:
+  attribute_threshold_mode: "fixed"  # Use a fixed sigmoid threshold for attributes
+  attribute_threshold: 0.5  # Sigmoid threshold for converting attribute logits to labels
+  attribute_threshold_scale: 0.5  # Kept for compatibility; unused in fixed mode
+  attribute_threshold_min: 0.05  # Kept for compatibility; unused in fixed mode
+  attribute_threshold_max: 0.95  # Kept for compatibility; unused in fixed mode

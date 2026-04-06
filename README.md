@@ -1,16 +1,25 @@
 # Visual Genome Captioning E2E
 
-End-to-end pipeline for Visual Genome object/attribute classification, relationship classification, and caption demo generation.
+Config-driven Visual Genome pipelines for object, attribute, and relation classification, plus a lightweight caption demo wrapper.
 
 ## Overview
 
-The recommended entry point is [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb). It reads runtime settings from YAML instead of notebook constants.
+The repository is organized around three independent public pipelines:
+
+- object classification
+- attribute classification
+- relation classification
+
+Each pipeline has its own notebook, task-specific YAML config, trainer, and checkpoint flow. Object and attribute are separate tasks. Shared preprocessing and feature code still uses `task1`/`task2` names in a compatibility layer, but new entry points should use `object`, `attribute`, and `relation`.
+
+The recommended entry points are [notebooks/object_pipeline.ipynb](notebooks/object_pipeline.ipynb), [notebooks/attribute_pipeline.ipynb](notebooks/attribute_pipeline.ipynb), [notebooks/relation_pipeline.ipynb](notebooks/relation_pipeline.ipynb), and [notebooks/e2e_wrapper.ipynb](notebooks/e2e_wrapper.ipynb). [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) remains available as the legacy combined workflow.
 
 Configuration is split across:
 
 - [configs/config.yaml](configs/config.yaml)
-- [configs/task1_config.yaml](configs/task1_config.yaml)
-- [configs/task2_config.yaml](configs/task2_config.yaml)
+- [configs/object_config.yaml](configs/object_config.yaml)
+- [configs/attribute_config.yaml](configs/attribute_config.yaml)
+- [configs/relation_config.yaml](configs/relation_config.yaml)
 
 ## Quick Start
 
@@ -21,29 +30,36 @@ git clone https://github.com/HaianCao/ImageCaptioningE2E.git
 cd ImageCaptioningE2E
 ```
 
-2. Open and run [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb).
+2. Install dependencies.
 
-3. Open [notebooks/01_eda.ipynb](notebooks/01_eda.ipynb) when you want to inspect the dataset before training.
+```bash
+pip install -r requirements.txt
+```
 
-4. Edit the YAML configs, not the notebook, for the main runtime controls.
+3. Run one of the split notebooks for the pipeline you want to work on, or [notebooks/e2e_wrapper.ipynb](notebooks/e2e_wrapper.ipynb) to load checkpoints and run the caption demo.
+
+4. Open [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) only if you want the legacy combined workflow.
+
+5. Edit the YAML configs, not the notebook, for the main runtime controls.
 
 Key settings:
 
-- `pipeline.training_mode`: `task1`, `task2`, or `both`
-- `pipeline.download_data`: download missing Visual Genome metadata and images
-- `pipeline.pre_extract_features`: precompute and cache features before training
-- `sampling.strict_mode`: sample image IDs first, then split by image ID
-- `sampling.sample_size`: number of image IDs used in strict sample mode
-- `sampling.image_download_mode`: `none`, `sample`, or `all`
-- `sampling.max_samples`: optional debug cap per split
-- `feature_extraction.batch_size`: batch size used for feature extraction
-- `feature_extraction.resize_size` / `feature_extraction.crop_size`: image preprocessing sizes
+- `pipeline.training_mode`: `object`, `attribute`, `relation`, `all`, or `e2e`.
+- Legacy aliases `task1`, `task2`, and `both` remain available for backward compatibility.
+- `pipeline.download_data`: download missing Visual Genome metadata and images.
+- `pipeline.pre_extract_features`: precompute and cache features before training.
+- `sampling.strict_mode`: sample image IDs first, then split by image ID.
+- `sampling.sample_size`: number of image IDs used in strict sample mode.
+- `sampling.image_download_mode`: `none`, `sample`, or `all`.
+- `sampling.max_samples`: optional debug cap per split.
+- `feature_extraction.batch_size`: batch size used for feature extraction.
+- `feature_extraction.resize_size` / `feature_extraction.crop_size`: image preprocessing sizes.
 
-4. Run the notebook end to end.
+First-run guidance:
 
-- First run: keep `pipeline.download_data` enabled if raw files are missing.
-- Debug runs: set `sampling.max_samples` to a small number.
-- Strict sample mode: only the selected sample image IDs are split and downloaded.
+- Keep `pipeline.download_data` enabled if raw files are missing.
+- Use `sampling.max_samples` for small debug runs.
+- In strict sample mode, only the selected sample image IDs are split and downloaded.
 
 ## Data Sources
 
@@ -63,16 +79,18 @@ The pipeline no longer depends on the deprecated HuggingFace loading script.
 prj/
 ├── configs/
 │   ├── config.yaml
-│   ├── task1_config.yaml
-│   └── task2_config.yaml
-├── data/
-│   ├── raw/
-│   └── processed/
+│   ├── object_config.yaml
+│   ├── attribute_config.yaml
+│   └── relation_config.yaml
 ├── checkpoints/
+├── data/
 ├── logs/
 ├── notebooks/
-│   ├── complete_pipeline.ipynb
-│   └── 01_eda.ipynb
+│   ├── object_pipeline.ipynb
+│   ├── attribute_pipeline.ipynb
+│   ├── relation_pipeline.ipynb
+│   ├── e2e_wrapper.ipynb
+│   └── complete_pipeline.ipynb
 └── src/
     ├── data/
     ├── evaluation/
@@ -99,12 +117,15 @@ prj/
 - `AttributeClassifier` is a multi-label classifier: each ROI can activate multiple attributes at once with a sigmoid / BCE head.
 - The attribute output dimension is fixed by the attribute vocabulary size, but the number of active labels can vary per object.
 - `RelationClassifier` is also single-label over the relation vocabulary.
+- `VisualGenomeE2EModel` is a thin wrapper around the three trained checkpoints; it does not create a new joint multi-task model.
 
 ## Notes
 
-- Task 1 uses configurable MLP heads for object and attribute prediction; object classification is single-label, while attribute prediction is multi-label and the number of active attributes can vary per object.
-- Task 1 evaluation reports exact-match accuracy and sample-wise accuracy for attributes, plus F1.
-- Task 2 uses a configurable relation classifier with `concat`, `attention`, or `gated` fusion.
-- `01_eda.ipynb` is the lightweight notebook for dataset inspection and plotting.
-- Feature caches are stored under each task's processed directory in a relative `features/` folder.
+- Object and attribute use separate configs, notebooks, trainers, and checkpoints even though they share the same preprocessing family.
+- `task1`/`task2` naming is kept only in shared compatibility layers and legacy notebooks.
+- The object pipeline uses a configurable MLP head for single-label object prediction.
+- The attribute pipeline uses a configurable multi-label MLP head for attribute prediction.
+- Object evaluation reports top-k accuracy, and attribute evaluation reports exact-match accuracy plus micro metrics.
+- The relation pipeline uses a configurable relation classifier with `concat`, `attention`, or `gated` fusion.
+- Feature caches are stored under each pipeline's processed directory in a relative `features/` folder.
 - See [requirements.txt](requirements.txt) for the full dependency list.

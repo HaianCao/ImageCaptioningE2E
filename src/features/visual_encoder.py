@@ -86,10 +86,12 @@ class VisualEncoder(nn.Module):
     def freeze(self) -> None:
         for param in self.backbone.parameters():
             param.requires_grad = False
+        self.backbone.eval()
 
     def unfreeze(self) -> None:
         for param in self.backbone.parameters():
             param.requires_grad = True
+        self.backbone.train()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.backbone(x)

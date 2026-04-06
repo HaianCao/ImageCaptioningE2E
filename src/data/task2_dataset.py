@@ -1,5 +1,5 @@
 """
-Dataset cho Task 2: Relationship Classification.
+Dataset cho relation classification.
 
 Mỗi sample là một cặp (subject, object) với union bounding box:
 - Input: Ảnh union ROI crop chứa cả 2 đối tượng
@@ -16,8 +16,44 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
+from PIL import Image
+
 from .dataset import BaseVGDataset, load_vocab, load_json
 from .transforms import get_train_transforms, get_val_transforms
+
+
+def _normalize_input_mode(input_mode: str) -> str:
+    mode = str(input_mode).lower().strip()
+    aliases = {
+        "grayscale": "gray",
+        "grey": "gray",
+        "edge": "contour",
+        "edges": "contour",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in {"rgb", "gray", "contour"}:
+        raise ValueError("input_mode phải là 'rgb', 'gray', hoặc 'contour'")
+    return mode
+
+
+def _prepare_input_image(image: Image.Image, input_mode: str) -> Image.Image:
+    """Convert a cropped union ROI into the requested input mode before augmentation."""
+    mode = _normalize_input_mode(input_mode)
+
+    if mode == "rgb":
+        return image.convert("RGB")
+
+    if mode == "gray":
+        return image.convert("L").convert("RGB")
+
+    if mode == "contour":
+        import cv2
+
+        gray_image = np.array(image.convert("L"))
+        edges = cv2.Canny(gray_image, 100, 200)
+        return Image.fromarray(edges).convert("RGB")
+
+    raise ValueError(f"Unsupported input_mode: {input_mode}")
 
 
 class RelationshipDataset(BaseVGDataset):
@@ -59,6 +95,7 @@ class RelationshipDataset(BaseVGDataset):
         transform=None,
         feature_cache_file: Optional[str] = None,
         use_spatial_features: bool = True,
+        input_mode: str = "rgb",
         split: str = "train",
         max_samples: Optional[int] = None,
         cache_images: bool = False,
@@ -73,6 +110,7 @@ class RelationshipDataset(BaseVGDataset):
         self.relation_vocab = relation_vocab
         self.num_relations = len(relation_vocab)
         self.use_spatial_features = use_spatial_features
+        self.input_mode = _normalize_input_mode(input_mode)
         self.split = split
         self.feature_cache_file = feature_cache_file
         self.annotation_file = Path(annotation_file)
@@ -83,16 +121,16 @@ class RelationshipDataset(BaseVGDataset):
         self._feature_cache: Optional[Dict] = None
         self.cached_feature_dim: Optional[int] = None
         if feature_cache_file and Path(feature_cache_file).exists():
-            print(f"[Task2Dataset] Loading feature cache: {feature_cache_file}")
+            print(f"[RelationshipDataset] Loading feature cache: {feature_cache_file}")
             self._feature_cache = torch.load(feature_cache_file, map_location="cpu")
             cache_size = len(self._feature_cache) if self._feature_cache is not None else 0
-            print(f"[Task2Dataset] Loaded {cache_size} cached features")
+            print(f"[RelationshipDataset] Loaded {cache_size} cached features")
             if self._feature_cache:
                 first_feature = next(iter(self._feature_cache.values()))
                 if isinstance(first_feature, torch.Tensor) and first_feature.ndim >= 1:
                     self.cached_feature_dim = int(first_feature.shape[-1])
             else:
-                print(f"[Task2Dataset] Feature cache is empty; falling back to image mode")
+                print(f"[RelationshipDataset] Feature cache is empty; falling back to image mode")
                 self._feature_cache = None
 
         if max_samples and max_samples < len(self.samples):
@@ -109,7 +147,7 @@ class RelationshipDataset(BaseVGDataset):
             )
         raw = load_json(str(self.annotation_file))
         self.samples = raw if isinstance(raw, list) else raw.get("samples", [])
-        print(f"[Task2Dataset] Loaded {len(self.samples)} pairs từ {self.annotation_file}")
+        print(f"[RelationshipDataset] Loaded {len(self.samples)} pairs từ {self.annotation_file}")
 
     def _compute_spatial_features(
         self,
@@ -223,6 +261,7 @@ class RelationshipDataset(BaseVGDataset):
         img_w, img_h = self._get_image_size(sample, image)
 
         union_roi = self._crop_union_roi(image, subj_bbox, obj_bbox, padding=10)
+        union_roi = _prepare_input_image(union_roi, self.input_mode)
 
         if self.transform:
             union_roi = self.transform(union_roi)
@@ -257,6 +296,7 @@ def build_task2_datasets(
     use_feature_cache: bool = True,
     use_spatial_features: bool = True,
     feature_cache_dir: Optional[str] = None,
+    input_mode: str = "rgb",
     max_samples: Optional[int] = None,
     train_horizontal_flip_p: float = 0.5,
     train_color_jitter: bool = True,
@@ -291,6 +331,7 @@ def build_task2_datasets(
     mean = mean or [0.485, 0.456, 0.406]
     std = std or [0.229, 0.224, 0.225]
     relation_vocab = load_vocab(str(proc_path / "relation_vocab.json"))
+    input_mode = _normalize_input_mode(input_mode)
 
     train_transform = get_train_transforms(
         roi_size=roi_size,
@@ -310,7 +351,8 @@ def build_task2_datasets(
     def _make_ds(split, transform):
         cache_file = None
         if use_feature_cache:
-            cache_path = cache_root / f"{split}_features.pt"
+            cache_name = f"{split}_features.pt" if input_mode == "rgb" else f"{split}_{input_mode}_features.pt"
+            cache_path = cache_root / cache_name
             if cache_path.exists():
                 cache_file = str(cache_path)
 
@@ -321,6 +363,7 @@ def build_task2_datasets(
             transform=transform,
             feature_cache_file=cache_file,
             use_spatial_features=use_spatial_features,
+            input_mode=input_mode,
             split=split,
             max_samples=max_samples,
         )

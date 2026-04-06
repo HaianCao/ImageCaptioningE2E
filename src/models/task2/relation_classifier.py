@@ -1,7 +1,9 @@
 """
 Relation classifier for Task 2.
 
-Classifies relationships between object pairs using union features and spatial info.
+Supports two input modes:
+- feature mode: consumes pre-extracted union ROI features
+- image mode: attaches a learnable visual backbone and consumes union ROI images
 """
 
 import torch
@@ -9,13 +11,14 @@ import torch.nn as nn
 from typing import Optional
 
 from ..base_model import BaseModel
+from ...features.visual_encoder import VisualEncoder
 
 
 class RelationClassifier(BaseModel):
     """
     Relationship classification model.
 
-    Takes union ROI features + spatial features and predicts relationship type.
+    Takes union ROI features or union ROI images + spatial features and predicts relationship type.
     """
 
     def __init__(
@@ -28,6 +31,10 @@ class RelationClassifier(BaseModel):
         num_layers: int = 2,
         attention_heads: int = 8,
         fusion_method: str = "concat",  # "concat", "attention", "gated"
+        backbone_name: Optional[str] = None,
+        pretrained: bool = True,
+        freeze_backbone: bool = False,
+        learnable_backbone: bool = False,
         device: str = "cuda"
     ):
         super().__init__(device)
@@ -36,25 +43,45 @@ class RelationClassifier(BaseModel):
         self.feature_dim = feature_dim
         self.spatial_dim = spatial_dim
         self.fusion_method = fusion_method
+        self.learnable_backbone = bool(learnable_backbone or backbone_name)
+        self.backbone_name = backbone_name
+        self.encoder: Optional[VisualEncoder] = None
+        self.feature_projection: Optional[nn.Module] = None
 
         if num_layers < 1:
             raise ValueError("num_layers phải >= 1")
 
+        if self.learnable_backbone:
+            if backbone_name is None:
+                raise ValueError("backbone_name phải được cung cấp khi learnable_backbone=True")
+
+            self.encoder = VisualEncoder(
+                backbone_name=backbone_name,
+                pretrained=pretrained,
+                frozen=freeze_backbone,
+            )
+
+            encoded_dim = self.encoder.output_dim
+            if feature_dim is not None and feature_dim != encoded_dim:
+                self.feature_projection = nn.Linear(encoded_dim, feature_dim)
+                encoded_dim = feature_dim
+            self.feature_dim = encoded_dim
+
         # Feature fusion
         if fusion_method == "concat":
-            input_dim = feature_dim + spatial_dim
+            input_dim = self.feature_dim + spatial_dim
         elif fusion_method == "attention":
-            input_dim = feature_dim
-            self.spatial_encoder = nn.Linear(spatial_dim, feature_dim)
-            if feature_dim % attention_heads != 0:
+            input_dim = self.feature_dim
+            self.spatial_encoder = nn.Linear(spatial_dim, self.feature_dim)
+            if self.feature_dim % attention_heads != 0:
                 raise ValueError(
-                    f"feature_dim ({feature_dim}) phải chia hết cho attention_heads ({attention_heads})"
+                    f"feature_dim ({self.feature_dim}) phải chia hết cho attention_heads ({attention_heads})"
                 )
-            self.attention = nn.MultiheadAttention(feature_dim, num_heads=attention_heads, batch_first=True)
+            self.attention = nn.MultiheadAttention(self.feature_dim, num_heads=attention_heads, batch_first=True)
         elif fusion_method == "gated":
-            input_dim = feature_dim
+            input_dim = self.feature_dim
             self.spatial_gate = nn.Sequential(
-                nn.Linear(spatial_dim, feature_dim),
+                nn.Linear(spatial_dim, self.feature_dim),
                 nn.Sigmoid()
             )
         else:
@@ -71,17 +98,44 @@ class RelationClassifier(BaseModel):
         layers.append(nn.Linear(current_dim, num_relations))
         self.classifier = nn.Sequential(*layers)
 
+    def freeze_backbone(self) -> None:
+        """Freeze the visual backbone when the model is used in image mode."""
+        if self.encoder is not None:
+            self.encoder.freeze()
+
+    def unfreeze_backbone(self) -> None:
+        """Unfreeze the visual backbone when fine-tuning should start."""
+        if self.encoder is not None:
+            self.encoder.unfreeze()
+
+    def _encode_inputs(self, features: torch.Tensor) -> torch.Tensor:
+        if self.encoder is None:
+            return features
+
+        if features.dim() != 4:
+            raise ValueError(
+                "learnable_backbone=True requires image tensors with shape (batch, channels, height, width)"
+            )
+
+        encoded = self.encoder(features)
+        if self.feature_projection is not None:
+            encoded = self.feature_projection(encoded)
+        return encoded
+
     def forward(self, features: torch.Tensor, spatial: torch.Tensor) -> torch.Tensor:
         """
         Forward pass.
 
         Args:
             features: Union ROI features of shape (batch_size, feature_dim)
+                or Union ROI images of shape (batch_size, channels, height, width)
             spatial: Spatial features of shape (batch_size, spatial_dim)
 
         Returns:
             Logits of shape (batch_size, num_relations)
         """
+        features = self._encode_inputs(features)
+
         if self.fusion_method == "concat":
             # Concatenate features and spatial
             combined = torch.cat([features, spatial], dim=1)

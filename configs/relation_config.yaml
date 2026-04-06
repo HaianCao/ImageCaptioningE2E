@@ -1,8 +1,8 @@
 # ============================================================
-# Task 2 Configuration: Relationship Classification
+# Relation Configuration
 # ============================================================
 
-task: "task2"  # Task identifier for the Task 2 pipeline
+task: "relation"  # Explicit identifier for the relation pipeline
 
 # ── Visual Backbone ────────────────────────────────────────
 # Options: "resnet50", "resnet101", "efficientnet_b3",
@@ -10,21 +10,23 @@ task: "task2"  # Task identifier for the Task 2 pipeline
 backbone:
   name: "resnet50"  # Backbone architecture used for pairwise feature extraction
   pretrained: true  # Load pretrained weights for the backbone
+  learnable_backbone: true  # Attach the backbone directly inside the model when true
   freeze_backbone: false  # Freeze backbone weights during training when true
   freeze_epochs: 0  # Number of epochs to keep the backbone frozen before unfreezing
   feature_dim: 2048           # Output feature dimension per region
 
 # ── Dataset ────────────────────────────────────────────────
 dataset:
-  processed_dir: "data/processed/task2"  # Processed Task 2 annotations and vocabularies
+  processed_dir: "data/processed/relation"  # Processed relation annotations and vocabularies
   feature_cache_dir: "features"  # Relative cache folder for pre-extracted features
   use_feature_cache: true  # Read cached features instead of raw images
+  input_mode: "rgb"  # Relation pipeline input mode: rgb, gray, or contour
 
 # ── Label Space ────────────────────────────────────────────
 labels:
-  relation_vocab_file: "data/processed/task2/relation_vocab.json"  # Relation vocabulary file generated during preprocessing
+  relation_vocab_file: "data/processed/relation/relation_vocab.json"  # Relation vocabulary file generated during preprocessing
   max_relations: 100          # Keep the top-N most frequent relation types
-  predicate_vocab_file: "data/processed/task2/predicate_vocab.json"  # Raw predicate vocabulary file path
+  predicate_vocab_file: "data/processed/relation/predicate_vocab.json"  # Raw predicate vocabulary file path
 
 # ── Spatial Features ───────────────────────────────────────
 spatial:
@@ -48,9 +50,9 @@ loss:
 
 # ── Training Overrides ─────────────────────────────────────
 training:
-  batch_size: 1024  # Batch size used by Task 2 DataLoaders; cached features make larger batches feasible
-  max_epochs: 35  # Maximum Task 2 training epochs
-  lr: 3.0e-4  # Learning rate for Task 2 optimizer
+  batch_size: 512  # Batch size used by relation DataLoaders; cached features make larger batches feasible
+  max_epochs: 35  # Maximum relation training epochs
+  lr: 3.0e-4  # Learning rate for relation optimizer
 
 # ── Data Augmentation ──────────────────────────────────────
 augmentation:

@@ -130,8 +130,8 @@ def compute_multilabel_metrics(
         average: Kept for backward compatibility; not used by the sample metrics
 
     Returns:
-        Dict with exact-match accuracy, sample-wise accuracy summary,
-        sample F1, Jaccard, and Hamming loss.
+        Dict with exact-match accuracy, micro precision/recall/F1,
+        false-positive/false-negative rates, Hamming loss, and prediction-count diagnostics.
     """
     if isinstance(preds, torch.Tensor):
         pred_tensor = preds.detach().cpu()
@@ -151,11 +151,15 @@ def compute_multilabel_metrics(
     if pred_tensor.numel() == 0 or target_tensor.numel() == 0:
         return {
             'exact_match_accuracy': 0.0,
-            'sample_accuracy_mean': 0.0,
-            'sample_accuracy_variance': 0.0,
-            'sample_f1': 0.0,
-            'jaccard_index': 0.0,
+            'micro_precision': 0.0,
+            'micro_recall': 0.0,
+            'micro_f1': 0.0,
+            'false_positive_rate': 0.0,
+            'false_negative_rate': 0.0,
             'hamming_loss': 0.0,
+            'pred_positive_mean': 0.0,
+            'target_positive_mean': 0.0,
+            'pred_to_target_ratio': 0.0,
         }
 
     if pred_tensor.shape != target_tensor.shape:
@@ -196,29 +200,41 @@ def compute_multilabel_metrics(
     target_np = target_tensor.cpu().numpy().astype(int)
 
     exact_match_accuracy = float(accuracy_score(target_np, pred_np))
-    sample_accuracy_per_row = (pred_np == target_np).mean(axis=1) if pred_np.size else np.array([])
-    sample_accuracy_mean = float(sample_accuracy_per_row.mean()) if sample_accuracy_per_row.size else 0.0
-    sample_accuracy_variance = float(sample_accuracy_per_row.var(ddof=0)) if sample_accuracy_per_row.size else 0.0
+    pred_count = pred_np.sum(axis=1).astype(np.float32) if pred_np.size else np.array([], dtype=np.float32)
+    target_count = target_np.sum(axis=1).astype(np.float32) if pred_np.size else np.array([], dtype=np.float32)
 
-    intersection = np.logical_and(pred_np, target_np).sum(axis=1) if pred_np.size else np.array([])
-    pred_count = pred_np.sum(axis=1) if pred_np.size else np.array([])
-    target_count = target_np.sum(axis=1) if target_np.size else np.array([])
+    tp = float(np.logical_and(pred_np == 1, target_np == 1).sum()) if pred_np.size else 0.0
+    fp = float(np.logical_and(pred_np == 1, target_np == 0).sum()) if pred_np.size else 0.0
+    fn = float(np.logical_and(pred_np == 0, target_np == 1).sum()) if pred_np.size else 0.0
 
-    f1_denominator = pred_count + target_count
-    sample_f1 = np.ones_like(f1_denominator, dtype=np.float32)
-    np.divide(2.0 * intersection, f1_denominator, out=sample_f1, where=f1_denominator != 0)
+    precision_denominator = tp + fp
+    recall_denominator = tp + fn
+    micro_precision = tp / precision_denominator if precision_denominator > 0 else 0.0
+    micro_recall = tp / recall_denominator if recall_denominator > 0 else 0.0
+    micro_f1 = (2.0 * tp) / (2.0 * tp + fp + fn) if (2.0 * tp + fp + fn) > 0 else 0.0
 
-    union = np.logical_or(pred_np, target_np).sum(axis=1) if pred_np.size else np.array([])
-    jaccard = np.ones_like(union, dtype=np.float32)
-    np.divide(intersection, union, out=jaccard, where=union != 0)
+    false_positive_rate = fp / precision_denominator if precision_denominator > 0 else 0.0
+    false_negative_rate = fn / recall_denominator if recall_denominator > 0 else 0.0
+
+    pred_positive_mean = float(pred_count.mean()) if pred_count.size else 0.0
+    target_positive_mean = float(target_count.mean()) if target_count.size else 0.0
+    pred_to_target_ratio = (
+        pred_positive_mean / target_positive_mean
+        if target_positive_mean > 0
+        else 0.0
+    )
 
     return {
         'exact_match_accuracy': exact_match_accuracy,
-        'sample_accuracy_mean': sample_accuracy_mean,
-        'sample_accuracy_variance': sample_accuracy_variance,
-        'sample_f1': float(sample_f1.mean()) if sample_f1.size else 0.0,
-        'jaccard_index': float(jaccard.mean()) if jaccard.size else 0.0,
+        'micro_precision': micro_precision,
+        'micro_recall': micro_recall,
+        'micro_f1': micro_f1,
+        'false_positive_rate': false_positive_rate,
+        'false_negative_rate': false_negative_rate,
         'hamming_loss': float(hamming_loss(target_np, pred_np)),
+        'pred_positive_mean': pred_positive_mean,
+        'target_positive_mean': target_positive_mean,
+        'pred_to_target_ratio': pred_to_target_ratio,
     }
 
 

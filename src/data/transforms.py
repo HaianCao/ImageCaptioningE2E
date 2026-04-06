@@ -70,6 +70,50 @@ def get_train_transforms(
     return transforms.Compose(aug_list)
 
 
+def get_object_train_transforms(
+    roi_size: int = 224,
+    mean: List[float] = IMAGENET_MEAN,
+    std: List[float] = IMAGENET_STD,
+    horizontal_flip_p: float = 0.5,
+    color_jitter: bool = True,
+    brightness: float = 0.2,
+    contrast: float = 0.2,
+    saturation: float = 0.2,
+    hue: float = 0.1,
+    random_erasing_p: float = 0.0,
+) -> transforms.Compose:
+    """
+    Tạo augmentation pipeline riêng cho Task 1 object ROI.
+
+    Giữ toàn bộ bbox sau khi crop, không random-crop lại bên trong ROI để tránh
+    làm mất tín hiệu của object khi bbox đã khá chặt.
+    """
+    aug_list = [
+        transforms.Resize((roi_size, roi_size)),
+        transforms.RandomHorizontalFlip(p=horizontal_flip_p),
+    ]
+
+    if color_jitter:
+        aug_list.append(
+            transforms.ColorJitter(
+                brightness=brightness,
+                contrast=contrast,
+                saturation=saturation,
+                hue=hue,
+            )
+        )
+
+    aug_list += [
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ]
+
+    if random_erasing_p > 0:
+        aug_list.append(transforms.RandomErasing(p=random_erasing_p))
+
+    return transforms.Compose(aug_list)
+
+
 def get_val_transforms(
     roi_size: int = 224,
     mean: List[float] = IMAGENET_MEAN,

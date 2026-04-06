@@ -6,86 +6,81 @@
 
 ## 1. Trạng Thái Dự Án (Project Status)
 
-**Mục tiêu cốt lõi**: Trích xuất Đối tượng, Thuộc tính (Task 1) + Mối quan hệ (Task 2) → Sinh caption demo.
-**Môi trường ưu tiên**: Kaggle / Google Colab, với [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) là entry point chính.
+**Mục tiêu cốt lõi**: tách Object, Attribute, Relation thành ba pipeline riêng, sau đó ghép checkpoint qua E2E wrapper để demo caption.
+**Môi trường ưu tiên**: notebook-driven workflow trong VS Code / Colab, nhưng các entry point chính là các notebook pipeline riêng.
 
-✅ **Đã hoàn thành**:
-- Thiết kế kiến trúc tổng quan.
-- Tạo cấu trúc thư mục (`configs/`, `data/`, `src/`, `notebooks/`).
-- Tạo các file config YAML (`config.yaml`, `task1_config.yaml`, `task2_config.yaml`).
-- Chuẩn hóa comment cho các tham số enum và tham số chức năng trong YAML để dễ chỉnh sửa.
-- Viết module tải dữ liệu gốc từ VG/Stanford dạng ZIP (`src/data/download.py`).
-- Khởi tạo Base Dataset, Transforms (`src/data/dataset.py`, `src/data/transforms.py`).
-- Khởi tạo Dataset logic cho Task 1 và Task 2 (`src/data/task1_dataset.py`, `src/data/task2_dataset.py`).
-- Hoàn thiện preprocessing raw → processed cho Task 1/2, gồm alias file gốc, vocab top-K, split train/val/test, strict sample mode và `image_info` cho Task 2 (`src/data/preprocessing.py`).
-- Viết Base visual encoder và extractors (`src/features/visual_encoder.py`, `src/features/roi_extractor.py`, `src/features/feature_extractor.py`).
-- Hoàn thiện module metric theo hướng accuracy + F1 và gắn vào pipeline train/eval (`src/evaluation/metrics.py`).
-- Nhúng & test thành công các thư viện chính, không còn lỗi import cốt lõi.
-- Cấu trúc models cơ bản (`src/models/base_model.py`, `src/models/task1/*`, `src/models/task2/*`, `src/models/caption/*`).
-- Base logic trainer (`src/training/trainer.py`, `src/training/task1_trainer.py`, `src/training/task2_trainer.py`) đã được sửa để train thật, checkpoint đúng và load best checkpoint đúng path.
-- Sửa feature cache để khớp key, xử lý cache rỗng an toàn và đồng bộ cache path với config.
-- Cập nhật `CaptionGenerator` để nhận đúng output thực tế từ trainer.
-- Biến [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) thành full pipeline config-driven: load YAML, fail-fast khi thiếu dữ liệu, strict sample mode, preprocess, extract feature, train, evaluate test, caption demo.
-- Thêm [notebooks/01_eda.ipynb](notebooks/01_eda.ipynb) làm notebook khám phá dữ liệu riêng.
-- Cập nhật [README.md](README.md) để phản ánh workflow hiện tại và bỏ các hướng dẫn hardcode cũ.
+✅ **Đã xác nhận**:
+- `get_errors` trên workspace hiện trả về no errors.
+- [notebooks/object_pipeline.ipynb](notebooks/object_pipeline.ipynb), [notebooks/attribute_pipeline.ipynb](notebooks/attribute_pipeline.ipynb), [notebooks/relation_pipeline.ipynb](notebooks/relation_pipeline.ipynb), và [notebooks/e2e_wrapper.ipynb](notebooks/e2e_wrapper.ipynb) là các entry point public hiện tại.
+- [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) vẫn tồn tại như workflow legacy và đã được làm sạch output.
+- [README.md](README.md) đã bỏ tham chiếu tới notebook không tồn tại như `01_eda.ipynb`.
+- Object và attribute dùng config/model/trainer riêng; shared preprocessing vẫn giữ `task1`/`task2` chỉ ở tầng compatibility.
+- Config public hiện tại là:
+  - `configs/config.yaml`
+  - `configs/object_config.yaml`
+  - `configs/attribute_config.yaml`
+  - `configs/relation_config.yaml`
 
-❌ **Cần tinh chỉnh / Đang thực hiện**:
-- Chạy lại pipeline end-to-end trên full dataset để xác minh ổn định ngoài chế độ debug (`MAX_SAMPLES`).
-- Đồng bộ scheduler config vào notebook/trainer nếu muốn `configs/config.yaml.scheduler` được dùng thật.
-- Nếu cần cho báo cáo cuối, bổ sung thêm bảng kết quả / metric phụ sau khi full-run xong.
-- Tối ưu tốc độ pre-extract feature và checkpoint cleanup nếu chạy trên Colab/Kaggle với bộ dữ liệu lớn.
+❗ **Cần giữ nhất quán**:
+- Object và Attribute là hai bài toán độc lập, không trộn chung config/model/trainer.
+- `task1`/`task2` chỉ dùng trong shared compatibility layer và legacy notebook.
+- Không thêm lại `01_eda.ipynb`, `task1_train.ipynb`, `task2_train.ipynb` vào docs vì các file đó không còn trong workspace.
+
+❌ **Còn lại / theo dõi**:
+- Chạy full dataset end-to-end để xác minh ổn định ngoài chế độ debug.
+- Nếu muốn dọn sâu hơn, đánh giá việc giữ hay bỏ các wrapper compatibility; hiện tại nên giữ để không phá import cũ.
 
 ---
 
 ## 2. Các Hàm & Module Đã Có (Inventory)
 
-### 2.1. Module `src/data`
-- `download.py`:
-  - `download_file(url, dest)`: Tải file dung lượng lớn.
-  - `unzip_file(...)`: Giải nén.
-  - `download_and_extract_metadata(...)`: Tải metadata Stanford ZIP → JSON nguyên bản.
-  - `download_vg_images(...)`: Tải ảnh từ Stanford VG image hosts.
-- `dataset.py`:
-  - `BaseVGDataset`: Class trừu tượng chứa logic ROI cropping chung.
-- `transforms.py`:
-  - `get_train_transforms`, `get_val_transforms`: Transform chuẩn.
-- `task1_dataset.py`:
-  - `ObjectAttributeDataset`: Dataset nhận input bbox → ảnh crop ROI → nhãn object và attributes.
-- `task2_dataset.py`:
-  - `RelationshipDataset`: Dataset nhận cặp bbox → union_bbox ảnh crop → nhãn relation.
+### 2.1. Notebook entry points
+- `notebooks/object_pipeline.ipynb`
+- `notebooks/attribute_pipeline.ipynb`
+- `notebooks/relation_pipeline.ipynb`
+- `notebooks/e2e_wrapper.ipynb`
+- `notebooks/complete_pipeline.ipynb`
 
-### 2.2. Module `src/features`
-- `roi_extractor.py`:
-  - `extract_roi`, `extract_union_roi`, `compute_spatial_features`.
-- `visual_encoder.py`:
-  - `VisualEncoder`: Build từ backbone ResNet/ViT.
-- `feature_extractor.py`:
-  - Extract feature batching để tạo cache `.pt`.
+### 2.2. Config
+- `configs/config.yaml`: global settings, runtime controls, sampling, logging.
+- `configs/object_config.yaml`: object-specific backbone, model, augmentation, eval.
+- `configs/attribute_config.yaml`: attribute-specific backbone, model, augmentation, eval.
+- `configs/relation_config.yaml`: relation-specific backbone, spatial, fusion, eval.
 
-### 2.3. Module `src/models`
-- `task1/object_classifier.py` & `attribute_classifier.py`:
-  - `ObjectClassifier`: single-label classification head, dùng cho 1 nhãn object chính mỗi sample.
-  - `AttributeClassifier`: multi-label classification head, dùng sigmoid/BCE và số nhãn active có thể thay đổi theo từng object.
-- `task2/relation_classifier.py`: MLP dự đoán quan hệ.
-- `caption/caption_generator.py`: Template-based caption generator, đã được nối lại để đọc output thực tế từ Task 1/2.
-- `notebooks/01_eda.ipynb`: Notebook khám phá dữ liệu, thống kê phân phối nhãn và xem mẫu ảnh.
+### 2.3. Primary APIs
+- Trainers:
+  - `src/training/object_trainer.py` -> `ObjectTrainer`
+  - `src/training/attribute_trainer.py` -> `AttributeTrainer`
+  - `src/training/relation_trainer.py` -> `RelationTrainer`
+- Model namespaces:
+  - `src/models/object/`
+  - `src/models/attribute/`
+  - `src/models/relation/`
+  - `src/models/e2e/`
+- Dataset wrappers:
+  - `src/data/object_dataset.py`
+  - `src/data/attribute_dataset.py`
+  - `src/data/relation_dataset.py`
+- Feature wrappers:
+  - `src/features/object_feature_extractor.py`
+  - `src/features/attribute_feature_extractor.py`
+  - `src/features/relation_feature_extractor.py`
 
-### 2.4. Module `src/evaluation`
-- `metrics.py`:
-  - Classification metrics cho Task 1/2: accuracy + F1.
-  - Multi-label Task 1 attributes có thêm exact-match accuracy và sample-wise accuracy.
-  - Caption metrics vẫn còn trong module nhưng không phải trọng tâm hiện tại.
-
----
-
-## 3. Kế hoạch sửa đổi (Next Steps)
-
-1. **Xác minh full run**
-  - Chạy lại notebook end-to-end để refresh outputs và kiểm tra ổn định trên data thật.
-
-2. **Hoàn thiện wiring còn treo**
-  - Nếu cần, nối `scheduler` config vào flow train thực tế.
-  - Tinh chỉnh logging / metrics phụ cho báo cáo cuối.
+### 2.4. Compatibility layer
+- `src/data/task1_dataset.py`
+- `src/data/task2_dataset.py`
+- `src/features/feature_extractor.py`
+- `src/models/task1/`
+- `src/models/task2/`
 
 ---
-*Cập nhật lần cuối: README và agent docs đã được đồng bộ với pipeline config-driven hiện tại*
+
+## 3. Ghi chú kỹ thuật
+- `VisualGenomeE2EModel` chỉ load ba checkpoint object/attribute/relation, không phải joint multi-task model.
+- Feature cache nằm dưới từng processed dir trong thư mục `features/`.
+- `pipeline.training_mode` chấp nhận `object`, `attribute`, `relation`, `all`, `e2e`; alias cũ `task1`, `task2`, `both` vẫn còn cho tương thích.
+- Nếu thêm import hoặc notebook mới, đừng dùng tên legacy làm public API mới.
+- Tài liệu user-facing phải khớp với naming `object`/`attribute`/`relation`, còn `task1`/`task2` chỉ xuất hiện khi cần backwards compatibility.
+
+---
+*Cập nhật lần cuối: README và agent docs đã được đồng bộ với pipeline split object/attribute/relation hiện tại*

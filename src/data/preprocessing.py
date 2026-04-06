@@ -429,3 +429,99 @@ def build_vocab_and_splits(
         )
     else:
         print(f"Unknown task: {task}")
+
+
+def preprocess_object_attribute(
+    raw_objects_path: str,
+    raw_attributes_path: str,
+    output_dir: str,
+    max_objects: int = 150,
+    max_attributes: int = 100,
+    sample_image_ids: Optional[List[int]] = None,
+    split_by_image_id: bool = False,
+    split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+    seed: int = 42,
+):
+    """Explicit preprocessing entrypoint for the object/attribute pipeline."""
+    return preprocess_task1(
+        raw_objects_path=raw_objects_path,
+        raw_attributes_path=raw_attributes_path,
+        output_dir=output_dir,
+        max_objects=max_objects,
+        max_attributes=max_attributes,
+        sample_image_ids=sample_image_ids,
+        split_by_image_id=split_by_image_id,
+        split_ratios=split_ratios,
+        seed=seed,
+    )
+
+
+def preprocess_relation(
+    raw_relationships_path: str,
+    output_dir: str,
+    max_relations: int = 150,
+    raw_image_data_path: Optional[str] = None,
+    sample_image_ids: Optional[List[int]] = None,
+    split_by_image_id: bool = False,
+    split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+    seed: int = 42,
+):
+    """Explicit preprocessing entrypoint for the relation pipeline."""
+    return preprocess_task2(
+        raw_relationships_path=raw_relationships_path,
+        output_dir=output_dir,
+        max_relations=max_relations,
+        raw_image_data_path=raw_image_data_path,
+        sample_image_ids=sample_image_ids,
+        split_by_image_id=split_by_image_id,
+        split_ratios=split_ratios,
+        seed=seed,
+    )
+
+
+def build_object_attribute_vocab_and_splits(
+    raw_dir: str = "data/raw",
+    processed_dir: str = "data/processed/object_attribute",
+    max_objects: int = 150,
+    max_attributes: int = 100,
+    sample_image_ids: Optional[List[int]] = None,
+    split_by_image_id: bool = False,
+    split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+    seed: int = 42,
+):
+    """Object/attribute-specific vocabulary and split builder."""
+    r_dir = Path(raw_dir)
+    return preprocess_object_attribute(
+        raw_objects_path=str(r_dir / "objects.json"),
+        raw_attributes_path=str(r_dir / "attributes.json"),
+        output_dir=processed_dir,
+        max_objects=max_objects,
+        max_attributes=max_attributes,
+        sample_image_ids=sample_image_ids,
+        split_by_image_id=split_by_image_id,
+        split_ratios=split_ratios,
+        seed=seed,
+    )
+
+
+def build_relation_vocab_and_splits(
+    raw_dir: str = "data/raw",
+    processed_dir: str = "data/processed/relation",
+    max_relations: int = 150,
+    sample_image_ids: Optional[List[int]] = None,
+    split_by_image_id: bool = False,
+    split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+    seed: int = 42,
+):
+    """Relation-specific vocabulary and split builder."""
+    r_dir = Path(raw_dir)
+    return preprocess_relation(
+        raw_relationships_path=str(r_dir / "relationships.json"),
+        output_dir=processed_dir,
+        max_relations=max_relations,
+        raw_image_data_path=str(r_dir / "image_data.json"),
+        sample_image_ids=sample_image_ids,
+        split_by_image_id=split_by_image_id,
+        split_ratios=split_ratios,
+        seed=seed,
+    )

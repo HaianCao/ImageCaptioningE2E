@@ -1,5 +1,5 @@
 """
-Caption generator for combining Task 1 + Task 2 results.
+Caption generator for combining object/attribute and relation results.
 
 Uses template-based generation for simplicity and interpretability.
 """
@@ -159,16 +159,16 @@ class CaptionGenerator:
 
     def generate_from_predictions(
         self,
-        task1_results: Dict[str, Any],
-        task2_results: Dict[str, Any],
+        object_attribute_results: Dict[str, Any],
+        relation_results: Dict[str, Any],
         top_k: int = 3
     ) -> List[str]:
         """
         Generate captions from model predictions.
 
         Args:
-            task1_results: Results from Task 1 (objects + attributes)
-            task2_results: Results from Task 2 (relationships)
+            object_attribute_results: Results from the object/attribute pipeline
+            relation_results: Results from the relation pipeline
             top_k: Number of captions to generate
 
         Returns:
@@ -176,28 +176,28 @@ class CaptionGenerator:
         """
         captions = []
 
-        object_source = task1_results.get("object_preds")
+        object_source = object_attribute_results.get("object_preds")
         if object_source is None:
-            object_source = task1_results.get("object_logits")
+            object_source = object_attribute_results.get("object_logits")
         if object_source is None:
-            object_source = task1_results.get("object_pred")
+            object_source = object_attribute_results.get("object_pred")
 
-        relation_source = task2_results.get("relation_preds")
+        relation_source = relation_results.get("relation_preds")
         if relation_source is None:
-            relation_source = task2_results.get("relation_logits")
+            relation_source = relation_results.get("relation_logits")
         if relation_source is None:
-            relation_source = task2_results.get("relation_pred")
+            relation_source = relation_results.get("relation_pred")
 
-        attribute_source = task1_results.get("attribute_logits")
+        attribute_source = object_attribute_results.get("attribute_logits")
         if attribute_source is None:
-            attribute_source = task1_results.get("attribute_preds")
+            attribute_source = object_attribute_results.get("attribute_preds")
 
         obj_pred = self._decode_class_prediction(object_source)
         rel_pred = self._decode_class_prediction(relation_source)
 
-        subject_name = task2_results.get("subject_name") or (self.idx_to_object.get(obj_pred, "object") if obj_pred is not None else None)
-        object_name = task2_results.get("object_name") or (self.idx_to_object.get(obj_pred, "object") if obj_pred is not None else None)
-        relation = task2_results.get("predicate")
+        subject_name = relation_results.get("subject_name") or (self.idx_to_object.get(obj_pred, "object") if obj_pred is not None else None)
+        object_name = relation_results.get("object_name") or (self.idx_to_object.get(obj_pred, "object") if obj_pred is not None else None)
+        relation = relation_results.get("predicate")
         if relation is None and rel_pred is not None:
             relation = self.idx_to_relation.get(rel_pred, "relates to")
         if relation is None:
