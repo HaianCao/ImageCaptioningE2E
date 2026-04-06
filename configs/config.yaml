@@ -4,7 +4,7 @@
 
 project_name: "ImageCaptioningE2E"  # Experiment name used in logs, checkpoints, and reports
 seed: 42  # Global random seed for reproducible sampling, splitting, and training
-device: "cpu"  # Execution device: "cuda" for GPU or "cpu" for CPU
+device: "cuda"  # Execution device: "cuda" for GPU or "cpu" for CPU
 
 # ── Paths ──────────────────────────────────────────────────
 paths:
