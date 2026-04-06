@@ -6,9 +6,7 @@ Mỗi sample là một ROI crop tương ứng với 1 object trong Visual Genome
 - Output 1: Object class index (single-label)
 - Output 2: Attribute label vector (multi-label binary)
 
-Hỗ trợ 2 chế độ:
-- Image mode: Load ảnh và crop ROI on-the-fly
-- Feature cache mode: Load pre-extracted feature vectors từ .pt file
+Hiện chỉ hỗ trợ image mode on-the-fly.
 """
 
 import json
@@ -20,7 +18,7 @@ from typing import Optional, List, Dict, Tuple
 from PIL import Image
 
 from .dataset import BaseVGDataset, load_vocab, load_json
-from .transforms import get_object_train_transforms, get_val_transforms
+from .preprocessing_strategies import build_preprocessing_preset
 
 
 def _normalize_object_input_mode(input_mode: str) -> str:
@@ -74,15 +72,11 @@ class ObjectAttributeDataset(BaseVGDataset):
         object_vocab: Dict {object_name: index}
         attribute_vocab: Dict {attribute_name: index}
         transform: torchvision transform pipeline
-        feature_cache_file: Nếu set, load features từ .pt thay vì ảnh
         split: "train", "val", hoặc "test"
         max_samples: Giới hạn số samples (debug)
 
-    Returns (khi không dùng cache):
+    Returns:
         dict với keys: "image", "object_label", "attribute_labels", "meta"
-
-    Returns (khi dùng feature cache):
-        dict với keys: "feature", "object_label", "attribute_labels", "meta"
     """
 
     def __init__(
@@ -92,8 +86,6 @@ class ObjectAttributeDataset(BaseVGDataset):
         object_vocab: Dict[str, int],
         attribute_vocab: Dict[str, int],
         transform=None,
-        feature_cache_file: Optional[str] = None,
-        object_feature_cache_file: Optional[str] = None,
         input_mode: str = "rgb",
         split: str = "train",
         max_samples: Optional[int] = None,
@@ -111,44 +103,11 @@ class ObjectAttributeDataset(BaseVGDataset):
         self.num_objects = len(object_vocab)
         self.num_attributes = len(attribute_vocab)
         self.split = split
-        self.feature_cache_file = feature_cache_file
-        self.object_feature_cache_file = object_feature_cache_file
         self.input_mode = _normalize_object_input_mode(input_mode)
 
         # Load annotation
         self.annotation_file = Path(annotation_file)
         self._load_annotations()
-
-        # Load feature cache nếu có
-        self._feature_cache: Optional[Dict] = None
-        self._object_feature_cache: Optional[Dict] = None
-        self.cached_feature_dim: Optional[int] = None
-        self.cached_object_feature_dim: Optional[int] = None
-        if feature_cache_file and Path(feature_cache_file).exists():
-            print(f"[ObjectAttributeDataset] Loading feature cache: {feature_cache_file}")
-            self._feature_cache = torch.load(feature_cache_file, map_location="cpu")
-            cache_size = len(self._feature_cache) if self._feature_cache is not None else 0
-            print(f"[ObjectAttributeDataset] Loaded {cache_size} cached features")
-            if self._feature_cache:
-                first_feature = next(iter(self._feature_cache.values()))
-                if isinstance(first_feature, torch.Tensor) and first_feature.ndim >= 1:
-                    self.cached_feature_dim = int(first_feature.shape[-1])
-            else:
-                print(f"[ObjectAttributeDataset] Feature cache is empty; falling back to image mode")
-                self._feature_cache = None
-
-        if object_feature_cache_file and Path(object_feature_cache_file).exists():
-            print(f"[ObjectAttributeDataset] Loading object feature cache: {object_feature_cache_file}")
-            self._object_feature_cache = torch.load(object_feature_cache_file, map_location="cpu")
-            object_cache_size = len(self._object_feature_cache) if self._object_feature_cache is not None else 0
-            print(f"[ObjectAttributeDataset] Loaded {object_cache_size} object cached features")
-            if self._object_feature_cache:
-                first_feature = next(iter(self._object_feature_cache.values()))
-                if isinstance(first_feature, torch.Tensor) and first_feature.ndim >= 1:
-                    self.cached_object_feature_dim = int(first_feature.shape[-1])
-            else:
-                print(f"[ObjectAttributeDataset] Object feature cache is empty; falling back to shared cache")
-                self._object_feature_cache = None
 
         # Giới hạn samples nếu cần
         if max_samples and max_samples < len(self.samples):
@@ -185,29 +144,11 @@ class ObjectAttributeDataset(BaseVGDataset):
                 vec[idx] = 1.0
         return vec
 
-    def _get_cached_feature(
-        self,
-        cache: Optional[Dict],
-        sample: Dict,
-        fallback_idx: int,
-        fallback_dim: Optional[int],
-    ) -> Optional[torch.Tensor]:
-        if cache is None:
-            return None
-
-        key = str(sample.get("object_id", fallback_idx))
-        feature = cache.get(key)
-        if feature is None:
-            feature = cache.get(str(fallback_idx))
-        if feature is None and fallback_dim is not None:
-            feature = torch.zeros(fallback_dim, dtype=torch.float32)
-        return feature
-
     def __getitem__(self, idx: int) -> Dict:
         """
         Returns:
             dict:
-                - "feature" hoặc "image": tensor đặc trưng hoặc ảnh ROI
+                - "image": tensor ảnh ROI
                 - "object_label": tensor scalar (long) - class index
                 - "attribute_labels": tensor (num_attributes,) - binary vector
                 - "meta": dict chứa image_id, object_id, bbox
@@ -222,41 +163,6 @@ class ObjectAttributeDataset(BaseVGDataset):
             "bbox": sample["bbox"],
         }
 
-        # Chế độ feature cache
-        if self._feature_cache is not None or self._object_feature_cache is not None:
-            feature = self._get_cached_feature(
-                self._feature_cache,
-                sample,
-                idx,
-                self.cached_feature_dim or self.cached_object_feature_dim or 2048,
-            )
-            if feature is None:
-                feature = self._get_cached_feature(
-                    self._object_feature_cache,
-                    sample,
-                    idx,
-                    self.cached_object_feature_dim or self.cached_feature_dim or 2048,
-                )
-
-            object_feature = self._get_cached_feature(
-                self._object_feature_cache,
-                sample,
-                idx,
-                self.cached_object_feature_dim or self.cached_feature_dim or 2048,
-            )
-            if object_feature is None:
-                object_feature = feature
-
-            return {
-                "feature": feature,
-                "attribute_feature": feature,
-                "object_feature": object_feature,
-                "object_label": object_label,
-                "attribute_labels": attribute_labels,
-                "meta": meta,
-            }
-
-        # Chế độ image on-the-fly
         image = self._load_image(sample["image_id"])
         x, y, w, h = sample["bbox"]
         roi = self._crop_roi(image, x, y, w, h, padding=0)
@@ -274,12 +180,10 @@ class ObjectAttributeDataset(BaseVGDataset):
 
     def summary(self) -> str:
         n_images = len(self.get_image_ids())
-        has_cache = self._feature_cache is not None
         return (
             f"ObjectAttributeDataset [{self.split}]: "
             f"{len(self.samples)} ROIs | {n_images} images | "
-            f"{self.num_objects} objects | {self.num_attributes} attributes | "
-            f"cache={'✅' if has_cache else '❌'}"
+            f"{self.num_objects} objects | {self.num_attributes} attributes"
         )
 
 
@@ -287,8 +191,6 @@ def build_task1_datasets(
     processed_dir: str,
     image_dir: str,
     roi_size: int = 224,
-    use_feature_cache: bool = True,
-    feature_cache_dir: Optional[str] = None,
     input_mode: str = "rgb",
     object_input_mode: Optional[str] = None,
     max_samples: Optional[int] = None,
@@ -302,6 +204,7 @@ def build_task1_datasets(
     train_resize_delta: int = 32,
     mean: List[float] = None,
     std: List[float] = None,
+    preprocessing_strategy: str = "baseline_task1",
 ) -> Tuple["ObjectAttributeDataset", "ObjectAttributeDataset", "ObjectAttributeDataset"]:
     """
     Tạo train/val/test datasets cho Task 1 từ processed directory.
@@ -310,16 +213,12 @@ def build_task1_datasets(
         processed_dir: Thư mục chứa annotation JSON + vocab files
         image_dir: Thư mục ảnh gốc
         roi_size: Kích thước ROI crop
-        use_feature_cache: Dùng cached features nếu có
         max_samples: Giới hạn samples (debug)
 
     Returns:
         Tuple (train_dataset, val_dataset, test_dataset)
     """
     proc_path = Path(processed_dir)
-    cache_root = Path(feature_cache_dir) if feature_cache_dir else proc_path / "features"
-    if not cache_root.is_absolute():
-        cache_root = proc_path / cache_root
 
     mean = mean or [0.485, 0.456, 0.406]
     std = std or [0.229, 0.224, 0.225]
@@ -330,41 +229,30 @@ def build_task1_datasets(
     object_vocab = load_vocab(str(proc_path / "object_vocab.json"))
     attribute_vocab = load_vocab(str(proc_path / "attribute_vocab.json"))
 
-    train_transform = get_object_train_transforms(
+    preprocessing = build_preprocessing_preset(
+        preprocessing_strategy,
         roi_size=roi_size,
         mean=mean,
         std=std,
-        horizontal_flip_p=train_horizontal_flip_p,
-        color_jitter=train_color_jitter,
-        brightness=train_brightness,
-        contrast=train_contrast,
-        saturation=train_saturation,
-        hue=train_hue,
-        random_erasing_p=train_random_erasing_p,
+        train_horizontal_flip_p=train_horizontal_flip_p,
+        train_color_jitter=train_color_jitter,
+        train_brightness=train_brightness,
+        train_contrast=train_contrast,
+        train_saturation=train_saturation,
+        train_hue=train_hue,
+        train_random_erasing_p=train_random_erasing_p,
+        train_resize_delta=train_resize_delta,
     )
-    val_transform = get_val_transforms(roi_size=roi_size, mean=mean, std=std)
+    train_transform = preprocessing.train
+    val_transform = preprocessing.val
 
     def _make_ds(split, transform):
-        cache_file = None
-        object_cache_file = None
-        if use_feature_cache:
-            if input_mode == "rgb":
-                cache_path = cache_root / f"{split}_features.pt"
-                if cache_path.exists():
-                    cache_file = str(cache_path)
-            else:
-                object_cache_path = cache_root / f"{split}_{input_mode}_features.pt"
-                if object_cache_path.exists():
-                    object_cache_file = str(object_cache_path)
-
         return ObjectAttributeDataset(
             annotation_file=str(proc_path / split / "annotations.json"),
             image_dir=image_dir,
             object_vocab=object_vocab,
             attribute_vocab=attribute_vocab,
             transform=transform,
-            feature_cache_file=cache_file,
-            object_feature_cache_file=object_cache_file,
             input_mode=input_mode,
             split=split,
             max_samples=max_samples,

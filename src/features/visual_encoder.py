@@ -1,50 +1,37 @@
 """
 Visual Encoder: Configurable pretrained backbone cho feature extraction.
 
-Hỗ trợ các backbone:
+Hỗ trợ:
 - ResNet-50, ResNet-101 (torchvision)
-- EfficientNet-B3, EfficientNet-B5 (timm)
-- ViT-Base/16, ViT-Large/16 (timm)
+- Bất kỳ backbone timm hợp lệ nào, gồm ConvNeXt, ConvNeXt V2, Swin,
+  EfficientNetV2, và ViT variants.
 
-Tất cả đều trả về feature vector 1D (global average pooled).
+Tất cả backbone đều trả về feature vector 1D sau pooling.
 """
 
-from typing import Optional, Dict
+from typing import Tuple
 import torch
 import torch.nn as nn
 from torchvision import models
 
-BACKBONE_CONFIGS: Dict[str, Dict] = {
-    "resnet50": {
-        "feature_dim": 2048,
-        "source": "torchvision",
-        "timm_name": None,
-    },
-    "resnet101": {
-        "feature_dim": 2048,
-        "source": "torchvision",
-        "timm_name": None,
-    },
-    "efficientnet_b3": {
-        "feature_dim": 1536,
-        "source": "timm",
-        "timm_name": "efficientnet_b3",
-    },
-    "efficientnet_b5": {
-        "feature_dim": 2048,
-        "source": "timm",
-        "timm_name": "efficientnet_b5",
-    },
-    "vit_base_16": {
-        "feature_dim": 768,
-        "source": "timm",
-        "timm_name": "vit_base_patch16_224",
-    },
-    "vit_large_16": {
-        "feature_dim": 1024,
-        "source": "timm",
-        "timm_name": "vit_large_patch16_224",
-    },
+TORCHVISION_BACKBONES = {
+    "resnet50": "resnet50",
+    "resnet101": "resnet101",
+}
+
+TIMM_BACKBONE_ALIASES = {
+    "efficientnet_b3": "efficientnet_b3",
+    "efficientnet_b5": "efficientnet_b5",
+    "efficientnetv2_s": "efficientnetv2_s",
+    "efficientnetv2_m": "efficientnetv2_m",
+    "convnext_tiny": "convnext_tiny",
+    "convnext_small": "convnext_small",
+    "convnextv2_tiny": "convnextv2_tiny",
+    "convnextv2_base": "convnextv2_base",
+    "swin_tiny_patch4_window7_224": "swin_tiny_patch4_window7_224",
+    "swin_small_patch4_window7_224": "swin_small_patch4_window7_224",
+    "vit_base_16": "vit_base_patch16_224",
+    "vit_large_16": "vit_large_patch16_224",
 }
 
 class VisualEncoder(nn.Module):
@@ -53,35 +40,44 @@ class VisualEncoder(nn.Module):
     """
     def __init__(self, backbone_name: str = "resnet50", pretrained: bool = True, frozen: bool = False):
         super().__init__()
-        if backbone_name not in BACKBONE_CONFIGS:
-            raise ValueError(f"Backbone '{backbone_name}' không được hỗ trợ.")
-
         self.backbone_name = backbone_name
-        config = BACKBONE_CONFIGS[backbone_name]
-        self.feature_dim = config["feature_dim"]
-
-        if config["source"] == "torchvision":
-            self.backbone = self._build_torchvision(backbone_name, pretrained)
+        if backbone_name in TORCHVISION_BACKBONES:
+            self.backbone, self.feature_dim = self._build_torchvision(backbone_name, pretrained)
         else:
-            self.backbone = self._build_timm(config["timm_name"], pretrained)
+            self.backbone, self.feature_dim = self._build_timm(backbone_name, pretrained)
+
+        if self.feature_dim is None:
+            raise ValueError(f"Không thể suy ra feature dimension cho backbone '{backbone_name}'")
 
         if frozen:
             self.freeze()
 
-    def _build_torchvision(self, name: str, pretrained: bool) -> nn.Module:
+    def _build_torchvision(self, name: str, pretrained: bool) -> Tuple[nn.Module, int]:
         weights_map = {
             "resnet50": models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None,
             "resnet101": models.ResNet101_Weights.IMAGENET1K_V2 if pretrained else None,
         }
         model_fn = getattr(models, name)
         model = model_fn(weights=weights_map[name])
+        feature_dim = int(model.fc.in_features)
         model.fc = nn.Identity()
-        return model
+        return model, feature_dim
 
-    def _build_timm(self, timm_name: str, pretrained: bool) -> nn.Module:
+    def _build_timm(self, backbone_name: str, pretrained: bool) -> Tuple[nn.Module, int]:
         import timm
+
+        timm_name = TIMM_BACKBONE_ALIASES.get(backbone_name, backbone_name)
         model = timm.create_model(timm_name, pretrained=pretrained, num_classes=0, global_pool="avg")
-        return model
+
+        feature_dim = getattr(model, "num_features", None)
+        if feature_dim is None and hasattr(model, "feature_info") and hasattr(model.feature_info, "channels"):
+            channels = model.feature_info.channels()
+            feature_dim = channels[-1] if channels else None
+
+        if feature_dim is None:
+            raise ValueError(f"Không thể suy ra feature dimension cho backbone '{backbone_name}'")
+
+        return model, int(feature_dim)
 
     def freeze(self) -> None:
         for param in self.backbone.parameters():

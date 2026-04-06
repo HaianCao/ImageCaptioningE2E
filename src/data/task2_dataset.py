@@ -5,9 +5,7 @@ Mỗi sample là một cặp (subject, object) với union bounding box:
 - Input: Ảnh union ROI crop chứa cả 2 đối tượng
 - Output: Relation/predicate class index
 
-Hỗ trợ 2 chế độ:
-- Image mode: Load ảnh và crop union ROI on-the-fly
-- Feature cache mode: Load pre-extracted visual + spatial features từ .pt file
+Hiện chỉ hỗ trợ image mode on-the-fly.
 """
 
 import json
@@ -19,7 +17,7 @@ from typing import Optional, List, Dict, Tuple
 from PIL import Image
 
 from .dataset import BaseVGDataset, load_vocab, load_json
-from .transforms import get_relation_train_transforms, get_val_transforms
+from .preprocessing_strategies import build_preprocessing_preset
 
 
 def _normalize_input_mode(input_mode: str) -> str:
@@ -75,16 +73,12 @@ class RelationshipDataset(BaseVGDataset):
         image_dir: Thư mục ảnh gốc
         relation_vocab: Dict {predicate_name: index}
         transform: torchvision transform pipeline
-        feature_cache_file: Nếu set, load visual features từ .pt
         use_spatial_features: Append spatial geometric features
         split: "train", "val", "test"
         max_samples: Giới hạn samples (debug)
 
-    Returns (image mode):
+    Returns:
         dict: "image", "spatial", "relation_label", "meta"
-
-    Returns (cache mode):
-        dict: "feature", "spatial", "relation_label", "meta"
     """
 
     def __init__(
@@ -93,7 +87,6 @@ class RelationshipDataset(BaseVGDataset):
         image_dir: str,
         relation_vocab: Dict[str, int],
         transform=None,
-        feature_cache_file: Optional[str] = None,
         use_spatial_features: bool = True,
         input_mode: str = "rgb",
         split: str = "train",
@@ -112,26 +105,9 @@ class RelationshipDataset(BaseVGDataset):
         self.use_spatial_features = use_spatial_features
         self.input_mode = _normalize_input_mode(input_mode)
         self.split = split
-        self.feature_cache_file = feature_cache_file
         self.annotation_file = Path(annotation_file)
 
         self._load_annotations()
-
-        # Load feature cache nếu có
-        self._feature_cache: Optional[Dict] = None
-        self.cached_feature_dim: Optional[int] = None
-        if feature_cache_file and Path(feature_cache_file).exists():
-            print(f"[RelationshipDataset] Loading feature cache: {feature_cache_file}")
-            self._feature_cache = torch.load(feature_cache_file, map_location="cpu")
-            cache_size = len(self._feature_cache) if self._feature_cache is not None else 0
-            print(f"[RelationshipDataset] Loaded {cache_size} cached features")
-            if self._feature_cache:
-                first_feature = next(iter(self._feature_cache.values()))
-                if isinstance(first_feature, torch.Tensor) and first_feature.ndim >= 1:
-                    self.cached_feature_dim = int(first_feature.shape[-1])
-            else:
-                print(f"[RelationshipDataset] Feature cache is empty; falling back to image mode")
-                self._feature_cache = None
 
         if max_samples and max_samples < len(self.samples):
             self.samples = self.samples[:max_samples]
@@ -215,7 +191,7 @@ class RelationshipDataset(BaseVGDataset):
         """
         Returns:
             dict:
-                - "feature" hoặc "image": cached feature hoặc union ROI ảnh
+                - "image": union ROI ảnh
                 - "spatial": tensor shape (9,) - spatial geometric features
                 - "relation_label": tensor scalar (long)
                 - "meta": dict với image_id, relationship_id, subject/object info
@@ -234,29 +210,6 @@ class RelationshipDataset(BaseVGDataset):
         subj_bbox = sample["subject_bbox"]
         obj_bbox = sample["object_bbox"]
 
-        # Chế độ feature cache
-        if self._feature_cache is not None:
-            key = str(sample.get("relationship_id", idx))
-            feature = self._feature_cache.get(key)
-            if feature is None:
-                feature = self._feature_cache.get(str(idx))
-            if feature is None:
-                feature_dim = self.cached_feature_dim or 2048
-                feature = torch.zeros(feature_dim, dtype=torch.float32)
-
-            spatial = torch.zeros(9)
-            if self.use_spatial_features:
-                img_w, img_h = self._get_image_size(sample)
-                spatial = self._compute_spatial_features(subj_bbox, obj_bbox, img_w, img_h)
-
-            return {
-                "feature": feature,
-                "spatial": spatial,
-                "relation_label": relation_label,
-                "meta": meta,
-            }
-
-        # Chế độ image on-the-fly
         image = self._load_image(sample["image_id"])
         img_w, img_h = self._get_image_size(sample, image)
 
@@ -279,13 +232,10 @@ class RelationshipDataset(BaseVGDataset):
 
     def summary(self) -> str:
         n_images = len(self.get_image_ids())
-        has_cache = self._feature_cache is not None
         return (
             f"RelationshipDataset [{self.split}]: "
             f"{len(self.samples)} pairs | {n_images} images | "
-            f"{self.num_relations} relations | "
-            f"spatial={'✅' if self.use_spatial_features else '❌'} | "
-            f"cache={'✅' if has_cache else '❌'}"
+            f"{self.num_relations} relations | spatial={'✅' if self.use_spatial_features else '❌'}"
         )
 
 
@@ -293,9 +243,7 @@ def build_task2_datasets(
     processed_dir: str,
     image_dir: str,
     roi_size: int = 224,
-    use_feature_cache: bool = True,
     use_spatial_features: bool = True,
-    feature_cache_dir: Optional[str] = None,
     input_mode: str = "rgb",
     max_samples: Optional[int] = None,
     train_horizontal_flip_p: float = 0.5,
@@ -308,6 +256,7 @@ def build_task2_datasets(
     train_resize_delta: int = 32,
     mean: List[float] = None,
     std: List[float] = None,
+    preprocessing_strategy: str = "baseline_task2",
 ) -> Tuple["RelationshipDataset", "RelationshipDataset", "RelationshipDataset"]:
     """
     Tạo train/val/test datasets cho Task 2.
@@ -316,7 +265,6 @@ def build_task2_datasets(
         processed_dir: Thư mục processed Task 2
         image_dir: Thư mục ảnh gốc
         roi_size: Kích thước union ROI crop
-        use_feature_cache: Dùng cached features nếu có
         use_spatial_features: Sử dụng spatial geometric features
         max_samples: Giới hạn (debug)
 
@@ -324,42 +272,35 @@ def build_task2_datasets(
         Tuple (train_ds, val_ds, test_ds)
     """
     proc_path = Path(processed_dir)
-    cache_root = Path(feature_cache_dir) if feature_cache_dir else proc_path / "features"
-    if not cache_root.is_absolute():
-        cache_root = proc_path / cache_root
 
     mean = mean or [0.485, 0.456, 0.406]
     std = std or [0.229, 0.224, 0.225]
     relation_vocab = load_vocab(str(proc_path / "relation_vocab.json"))
     input_mode = _normalize_input_mode(input_mode)
 
-    train_transform = get_relation_train_transforms(
+    preprocessing = build_preprocessing_preset(
+        preprocessing_strategy,
         roi_size=roi_size,
         mean=mean,
         std=std,
-        color_jitter=train_color_jitter,
-        brightness=train_brightness,
-        contrast=train_contrast,
-        saturation=train_saturation,
-        hue=train_hue,
-        random_erasing_p=train_random_erasing_p,
+        train_horizontal_flip_p=train_horizontal_flip_p,
+        train_color_jitter=train_color_jitter,
+        train_brightness=train_brightness,
+        train_contrast=train_contrast,
+        train_saturation=train_saturation,
+        train_hue=train_hue,
+        train_random_erasing_p=train_random_erasing_p,
+        train_resize_delta=train_resize_delta,
     )
-    val_transform = get_val_transforms(roi_size=roi_size, mean=mean, std=std)
+    train_transform = preprocessing.train
+    val_transform = preprocessing.val
 
     def _make_ds(split, transform):
-        cache_file = None
-        if use_feature_cache:
-            cache_name = f"{split}_features.pt" if input_mode == "rgb" else f"{split}_{input_mode}_features.pt"
-            cache_path = cache_root / cache_name
-            if cache_path.exists():
-                cache_file = str(cache_path)
-
         return RelationshipDataset(
             annotation_file=str(proc_path / split / "annotations.json"),
             image_dir=image_dir,
             relation_vocab=relation_vocab,
             transform=transform,
-            feature_cache_file=cache_file,
             use_spatial_features=use_spatial_features,
             input_mode=input_mode,
             split=split,

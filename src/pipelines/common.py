@@ -98,18 +98,6 @@ def ensure_nonempty_cache(cache_path: Path) -> bool:
         return False
 
 
-def cache_output(feature_dir: Path, split_name: str, input_mode: str) -> Path:
-    """Build the feature cache filename used by the notebook pipelines."""
-    suffix = None if input_mode == "rgb" else input_mode
-    filename = f"{split_name}_features.pt" if suffix is None else f"{split_name}_{suffix}_features.pt"
-    return Path(feature_dir) / filename
-
-
-def feature_cache_ready(feature_dir: Path, split_names: Sequence[str], input_mode: str) -> bool:
-    """Check whether all requested feature cache files exist and are non-empty."""
-    return all(ensure_nonempty_cache(cache_output(feature_dir, split_name, input_mode)) for split_name in split_names)
-
-
 def collect_split_image_ids(processed_root: Path, split_names: Sequence[str]) -> List[int]:
     """Collect unique image ids referenced by the requested split annotation files."""
     image_ids = set()

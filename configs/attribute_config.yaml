@@ -2,71 +2,145 @@
 # Attribute Configuration
 # ============================================================
 
-task: "attribute"  # Explicit identifier for the attribute pipeline
+task: "attribute"
+# This file is dedicated to the attribute pipeline.
+# Keep this value as attribute so shared loaders resolve the correct task-specific settings.
 
-# ── Visual Backbone ────────────────────────────────────────
-# Options: "resnet50", "resnet101", "efficientnet_b3",
-#          "efficientnet_b5", "vit_base_16", "vit_large_16"
+# ── Backbone Runtime Flags ─────────────────────────────────
+# The actual backbone architecture is selected by model.strategy.
+# These flags only control how the selected backbone is initialized and trained.
 backbone:
-  name: "resnet50"  # Backbone architecture used for feature extraction
-  pretrained: true  # Load pretrained weights for the backbone
-  learnable_backbone: true  # Attach the backbone directly inside the model when true
-  freeze_backbone: false  # Freeze backbone weights during training when true
-  freeze_epochs: 0  # Number of epochs to keep the backbone frozen before unfreezing
-  feature_dim: 2048  # Output feature dimension produced by the backbone
+  # Load pretrained weights for the selected backbone.
+  # Set false when training from scratch or when you want to avoid pretrained initialization.
+  pretrained: true
+  # Freeze the selected backbone during training.
+  # Set true to train only the multilabel classification head.
+  freeze_backbone: false
 
 # ── Dataset ────────────────────────────────────────────────
 dataset:
-  processed_dir: "data/processed/attribute"  # Processed attribute annotations and vocabularies
-  feature_cache_dir: "features"  # Relative cache folder for pre-extracted features
-  use_feature_cache: true  # Read cached features instead of raw images
-  attribute_input_mode: "rgb"  # Attribute pipeline input mode: rgb, gray, or contour
+  # Directory containing processed attribute annotations and vocabularies.
+  # This is usually a repository-relative path, but an absolute path also works.
+  processed_dir: "data/processed/attribute"
+  # Input representation for the cropped ROI before augmentation.
+  # Supported canonical values:
+  # - rgb: keep the ROI in RGB color.
+  # - gray: convert to grayscale and expand back to 3 channels.
+  # - contour: convert to a Canny edge map and expand back to 3 channels.
+  # Accepted aliases:
+  # - grayscale, grey -> gray
+  # - edge, edges -> contour
+  attribute_input_mode: "rgb"
 
 # ── Label Space ────────────────────────────────────────────
 labels:
-  max_objects: 300  # Shared preprocessing cap for object/attribute vocabularies
-  max_attributes: 200  # Keep the top-N most frequent attribute labels
+  # Shared preprocessing cap for the object vocabulary used by task 1.
+  max_objects: 300
+  # Keep only the top-N most frequent attribute labels during preprocessing.
+  max_attributes: 200
 
 # ── Model Architecture ─────────────────────────────────────
 model:
-  attribute_hidden_dim: 512  # Hidden width of the attribute multi-label MLP
-  attribute_dropout: 0.3  # Dropout rate used in the attribute head
-  attribute_num_layers: 2  # Number of linear layers in the attribute head
+  # Registered attribute model strategy.
+  # Supported values:
+  # - baseline_cnn: ResNet-50 baseline preset.
+  # - modern_cnn: ConvNeXtV2-Tiny preset and the recommended default.
+  # - efficientnetv2_s: EfficientNetV2-S preset.
+  # - transformer: Swin-Tiny preset.
+  # Compatibility aliases:
+  # - resnet50 -> baseline_cnn
+  # - convnextv2_tiny -> modern_cnn
+  # - swin_tiny_patch4_window7_224 -> transformer
+  # The registry is extensible, so custom strategy names can be registered later.
+  strategy: "baseline_cnn"
+  # Hidden width of the attribute multilabel MLP head.
+  attribute_hidden_dim: 512
+  # Dropout rate used inside the attribute head.
+  attribute_dropout: 0.1
+  # Number of linear layers in the attribute head.
+  # 1 means a single linear classifier on top of the encoder output.
+  attribute_num_layers: 2
 
 # ── Loss Weights ───────────────────────────────────────────
 loss:
-  attribute_weight: 1.0  # Weight applied to attribute classification loss
-  attribute_pos_weight: 5.0  # Legacy scalar; auto class balancing now derives the actual BCE weights from the train split
+  # Scalar weight applied to the attribute classification loss.
+  # Increase this if you want to emphasize attribute prediction relative to other objectives.
+  attribute_weight: 1.0
+  # Legacy positive-class weight retained for compatibility with older notebooks and configs.
+  # The public trainer now derives the actual BCE weights from the training split automatically.
+  attribute_pos_weight: 5.0
 
 # ── Training Overrides ─────────────────────────────────────
 training:
-  batch_size: 256  # Batch size used by the attribute DataLoader; cached features make larger batches feasible
-  num_workers: 2  # Number of DataLoader workers for the attribute pipeline
-  pin_memory: true  # Pin host memory only when CUDA is available
-  max_epochs: 40  # Maximum attribute training epochs
-  early_stopping_patience: 5  # Stop after this many non-improving validation epochs
-  gradient_clip_val: 1.0  # Maximum gradient norm used for clipping
-  log_every_n_steps: 0  # Batch logging frequency; set 0 to disable batch-step logs
-  lr: 5.0e-4  # Learning rate for the attribute optimizer
-  weight_decay: 1.0e-4  # L2 regularization strength for the attribute optimizer
+  # Batch size used by the attribute DataLoader.
+  # Increase it if your GPU memory allows; reduce it for smaller cards.
+  batch_size: 256
+  # Number of DataLoader workers for attribute training.
+  num_workers: 2
+  # Pin host memory only when CUDA is available.
+  pin_memory: true
+  # Maximum number of training epochs.
+  max_epochs: 40
+  # Stop training after this many validation epochs without improvement.
+  early_stopping_patience: 5
+  # Maximum gradient norm used for clipping.
+  gradient_clip_val: 1.0
+  # Batch-step logging frequency; set 0 to disable per-step logs.
+  log_every_n_steps: 0
+  # Base learning rate for the attribute optimizer.
+  lr: 5.0e-4
+  # L2 regularization strength for AdamW.
+  weight_decay: 1.0e-4
 
-# ── Data Augmentation ──────────────────────────────────────
-augmentation:
-  resize_delta: 32  # Extra pixels added before random crop
-  random_horizontal_flip: 0.5  # Probability of horizontally flipping the ROI
+# ── Preprocessing ─────────────────────────────────────────
+preprocessing:
+  # Registered preprocessing preset for task 1.
+  # Supported values:
+  # - baseline_task1: canonical shared ROI preprocessing preset for task 1.
+  # - baseline_object: alias of baseline_task1 kept for object-specific readability.
+  # - baseline_attribute: alias of baseline_task1 kept for attribute-specific readability.
+  # The registry can also accept custom names if you register another strategy later.
+  strategy: "baseline_task1"
+  # Extra pixels added before the random crop.
+  # Larger values increase augmentation strength, but also change the crop context.
+  resize_delta: 32
+  # Probability of horizontally flipping the ROI.
+  # Flipping is acceptable for attribute prediction because the label does not depend on orientation.
+  random_horizontal_flip: 0.5
   color_jitter:
-    enabled: false  # Disabled by default; ROI data is already large enough
-    brightness: 0.2  # Brightness jitter magnitude
-    contrast: 0.2  # Contrast jitter magnitude
-    saturation: 0.2  # Saturation jitter magnitude
-    hue: 0.1  # Hue jitter magnitude
-  random_resized_crop: false  # Kept for compatibility; current pipeline uses fixed ROI crop
-  random_erasing_p: 0.0  # Probability of applying random erasing
+    # Enable or disable color jitter.
+    # When false, the brightness/contrast/saturation/hue values below are ignored.
+    enabled: false
+    # Brightness jitter magnitude.
+    brightness: 0.2
+    # Contrast jitter magnitude.
+    contrast: 0.2
+    # Saturation jitter magnitude.
+    saturation: 0.2
+    # Hue jitter magnitude.
+    hue: 0.1
+  # Legacy compatibility flag kept for older notebooks and configs.
+  # The public pipeline currently uses fixed ROI resize + crop and does not read this flag.
+  random_resized_crop: false
+  # Probability of random erasing after normalization.
+  # Set to 0.0 to disable it.
+  random_erasing_p: 0.0
 
 # ── Evaluation ─────────────────────────────────────────────
 eval:
-  attribute_threshold_mode: "fixed"  # Use a fixed sigmoid threshold for attributes
-  attribute_threshold: 0.5  # Sigmoid threshold for converting attribute logits to labels
-  attribute_threshold_scale: 0.5  # Kept for compatibility; unused in fixed mode
-  attribute_threshold_min: 0.05  # Kept for compatibility; unused in fixed mode
-  attribute_threshold_max: 0.95  # Kept for compatibility; unused in fixed mode
+  # Thresholding policy used to convert sigmoid outputs into binary attribute labels.
+  # Supported values:
+  # - fixed: use the fixed threshold below.
+  # - dynamic: adjust the threshold per batch/score scale when the trainer supports it.
+  attribute_threshold_mode: "fixed"
+  # Sigmoid threshold used when attribute_threshold_mode is fixed.
+  attribute_threshold: 0.5
+  # Legacy scaling factor kept for compatibility with older thresholding modes.
+  # The public pipeline ignores it when attribute_threshold_mode is fixed.
+  attribute_threshold_scale: 0.5
+  # Lower bound for dynamic thresholding.
+  # Kept for compatibility even when not used.
+  attribute_threshold_min: 0.05
+  # Upper bound for dynamic thresholding.
+  # Kept for compatibility even when not used.
+  attribute_threshold_max: 0.95

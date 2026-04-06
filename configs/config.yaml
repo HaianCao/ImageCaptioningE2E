@@ -2,52 +2,102 @@
 # Global Configuration
 # ============================================================
 
-project_name: "ImageCaptioningE2E"  # Experiment name used in logs, checkpoints, and reports
-seed: 42  # Global random seed for reproducible sampling, splitting, and training
-device: "cuda"  # Execution device: "cuda" for GPU or "cpu" for CPU
+# Free-form experiment label written to logs, checkpoints, and reports.
+# Use any descriptive string; for example, "ImageCaptioningE2E", "debug_run", or "ablation_v2".
+project_name: "ImageCaptioningE2E"
+
+# Global RNG seed used for sampling, split assignment, augmentation order, and model initialization.
+# Any integer is valid; reusing the same seed makes runs easier to reproduce.
+seed: 42
+
+# Preferred execution device.
+# Supported values:
+# - cuda: request GPU execution; the runtime falls back to cpu if CUDA is unavailable.
+# - cpu: force CPU execution even when a GPU is available.
+# Any string starting with cuda is treated as a GPU request and normalized to cuda.
+device: "cuda"
 
 # ── Paths ──────────────────────────────────────────────────
 paths:
-  data_dir: "data"  # Root folder for all dataset artifacts
-  raw_dir: "data/raw"  # Downloaded raw Visual Genome metadata and images
-  processed_dir: "data/processed"  # Preprocessed annotations and split files
-  feature_dir: "data/features"       # Shared feature cache root (.pt files)
-  checkpoint_dir: "checkpoints"  # Directory for saved model checkpoints
-  log_dir: "logs"  # Directory for training logs and TensorBoard outputs
+  # Root folder for all dataset artifacts.
+  # Relative paths are resolved from the repository root, but absolute paths also work.
+  data_dir: "data"
+  # Downloaded raw Visual Genome metadata and images.
+  raw_dir: "data/raw"
+  # Preprocessed annotations and split files.
+  processed_dir: "data/processed"
+  # Legacy feature cache root kept for compatibility with older notebooks and experiments.
+  # The public training pipelines no longer depend on pre-extracted features.
+  feature_dir: "data/features"
+  # Directory for saved model checkpoints.
+  checkpoint_dir: "checkpoints"
+  # Directory for training logs and TensorBoard outputs.
+  log_dir: "logs"
 
 # ── HuggingFace Dataset ────────────────────────────────────
 dataset:
-  repo_id: "ranjaykrishna/visual_genome"  # Hugging Face dataset repository ID
-  cache_dir: "data/raw/hf_cache"  # Local Hugging Face cache directory
-  image_dir: "data/raw/images"  # Download destination for VG image files
+  # Hugging Face dataset repository identifier in owner/dataset format.
+  # Default: ranjaykrishna/visual_genome.
+  repo_id: "ranjaykrishna/visual_genome"
+  # Local Hugging Face cache directory for downloaded metadata.
+  cache_dir: "data/raw/hf_cache"
+  # Download destination for Visual Genome image files.
+  image_dir: "data/raw/images"
 
 # ── Image Processing ───────────────────────────────────────
 image:
-  roi_size: 224          # Final ROI crop size fed to the encoder
-  mean: [0.485, 0.456, 0.406]    # Channel-wise normalization mean
-  std: [0.229, 0.224, 0.225]     # Channel-wise normalization std
+  # Final ROI crop size fed to the encoder.
+  roi_size: 224
+  # Channel-wise normalization mean in RGB order.
+  # These values should match the pretrained backbone's expected ImageNet normalization.
+  mean: [0.485, 0.456, 0.406]
+  # Channel-wise normalization standard deviation in RGB order.
+  std: [0.229, 0.224, 0.225]
 
 # ── Data Split ─────────────────────────────────────────────
 split:
-  train: 0.70  # Proportion of data assigned to training
-  val: 0.15  # Proportion of data assigned to validation
-  test: 0.15  # Proportion of data assigned to test
+  # Proportion of data assigned to the training split.
+  train: 0.70
+  # Proportion of data assigned to the validation split.
+  val: 0.15
+  # Proportion of data assigned to the test split.
+  test: 0.15
 
 # ── Runtime / Notebook Controls ────────────────────────────
 pipeline:
-  training_mode: "all"  # Pipeline scope: "object", "attribute", "relation", "all", or "e2e" (legacy: "task1", "task2", "both")
-  download_data: true  # Download missing metadata/images before preprocessing
-  pre_extract_features: true  # Precompute and cache visual features before training
+  # Pipeline scope for the notebook/launcher entry point.
+  # Supported values:
+  # - object: run only the object pipeline.
+  # - attribute: run only the attribute pipeline.
+  # - relation: run only the relation pipeline.
+  # - all: run object, attribute, and relation sequentially.
+  # - e2e: run the lightweight end-to-end wrapper over the trained checkpoints.
+  # Legacy aliases retained for older notebook entry points:
+  # - task1: legacy task-1 workflow alias.
+  # - task2: legacy task-2 workflow alias.
+  # - both: legacy alias for running the full multi-task flow.
+  training_mode: "all"
+  # Download missing metadata and images before preprocessing.
+  # Set this to false only when data/raw already contains the required files.
+  download_data: true
 
 sampling:
-  strict_mode: true  # Sample image IDs first, then split before any extra downloads
-  sample_size: 200  # Number of image IDs to select in strict sample mode
-  split_ratios: [0.8, 0.1, 0.1]  # Train/val/test ratios for the sampled image set
-  seed: 42  # Seed for deterministic sampling and split assignment
-  image_download_mode: "sample"  # Image download policy: "none", "sample", or "all"
-  max_samples: null  # Optional per-split sample cap for fast debugging
-
-feature_extraction:
-  batch_size: 512  # Batch size used during feature extraction; AMP is enabled in code on CUDA
-  resize_size: 256  # Resize size before center crop
-  crop_size: 224  # Final crop size fed to the backbone
+  # When true, sample image IDs first and then split the sampled subset.
+  # When false, the pipeline uses the full split annotations.
+  strict_mode: true
+  # Number of image IDs selected before splitting when strict_mode is enabled.
+  sample_size: 200
+  # Train/val/test ratios for the sampled image subset.
+  # The three values should sum to 1.0.
+  split_ratios: [0.8, 0.1, 0.1]
+  # Seed used for deterministic sampling and split assignment inside strict mode.
+  seed: 42
+  # Policy for downloading images referenced by the sampled or processed splits.
+  # Supported values:
+  # - none: do not download images automatically.
+  # - sample: download only the selected sample image IDs.
+  # - all: download every referenced image ID.
+  image_download_mode: "sample"
+  # Optional per-split sample cap for debugging.
+  # Use null to disable the cap and keep all samples.
+  max_samples: null

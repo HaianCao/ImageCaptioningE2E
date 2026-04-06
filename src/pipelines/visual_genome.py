@@ -17,22 +17,17 @@ from ..data.object_dataset import build_object_datasets
 from ..data.preprocessing import build_object_attribute_vocab_and_splits, build_relation_vocab_and_splits
 from ..data.relation_dataset import build_relation_datasets
 from ..evaluation import compute_classification_metrics, compute_multilabel_metrics
-from ..features.attribute_feature_extractor import extract_attribute_features
-from ..features.object_feature_extractor import extract_object_features
-from ..features.relation_feature_extractor import extract_relation_features
-from ..models.attribute import AttributeClassifier
+from ..models.attribute import AttributeClassifier, build_attribute_classifier
 from ..models.object import ObjectClassifier
-from ..models.relation import RelationClassifier
+from ..models.task1.object_strategies import build_object_classifier
+from ..models.relation import RelationClassifier, build_relation_classifier
 from ..training.attribute_trainer import AttributeTrainer
 from ..training.object_trainer import ObjectTrainer
 from ..training.relation_trainer import RelationTrainer
 from ..utils.config_loader import load_task_configs, print_config
 from ..utils.memory import cleanup_cuda_memory
 from .common import (
-    cache_output,
     collect_split_image_ids,
-    configure_notebook_environment,
-    feature_cache_ready,
     get_device,
     missing_local_image_ids,
     normalize_input_mode,
@@ -40,6 +35,13 @@ from .common import (
     resolve_project_root,
     seed_everything,
 )
+
+
+def _get_preprocessing_config(task_config: Any) -> Any:
+    preprocessing_config = getattr(task_config, "preprocessing", None)
+    if preprocessing_config is None:
+        raise AttributeError("task_config.preprocessing is required")
+    return preprocessing_config
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,6 @@ class PipelineRuntime:
     raw_dir: Path
     image_dir: Path
     processed_dir: Path
-    feature_dir: Path
     checkpoint_dir: Path
     device: str
     download_data: bool
@@ -60,10 +61,6 @@ class PipelineRuntime:
     sample_size: int
     sample_seed: int
     image_download_mode: str
-    pre_extract_features: bool
-    feature_batch_size: int
-    feature_resize_size: int
-    feature_crop_size: int
     feature_mean: List[float]
     feature_std: List[float]
     split_ratios: Tuple[float, float, float]
@@ -80,7 +77,6 @@ class PipelineResult:
     train_metrics: Dict[str, Any]
     test_metrics: Dict[str, Any]
     processed_dir: str
-    feature_dir: str
 
 
 def _build_runtime(
@@ -98,7 +94,6 @@ def _build_runtime(
     raw_dir = project_root / Path(base_config.paths.raw_dir)
     image_dir = project_root / Path(base_config.dataset.image_dir)
     processed_dir = project_root / Path(task_config.dataset.processed_dir)
-    feature_dir = processed_dir / Path(task_config.dataset.feature_cache_dir)
     checkpoint_dir = project_root / Path(base_config.paths.checkpoint_dir)
 
     strict_sample_mode = bool(base_config.sampling.strict_mode)
@@ -111,7 +106,6 @@ def _build_runtime(
         raw_dir=raw_dir,
         image_dir=image_dir,
         processed_dir=processed_dir,
-        feature_dir=feature_dir,
         checkpoint_dir=checkpoint_dir,
         device=device,
         download_data=bool(base_config.pipeline.download_data),
@@ -119,10 +113,6 @@ def _build_runtime(
         sample_size=int(base_config.sampling.sample_size),
         sample_seed=int(base_config.sampling.seed),
         image_download_mode=image_download_mode,
-        pre_extract_features=bool(base_config.pipeline.pre_extract_features),
-        feature_batch_size=int(base_config.feature_extraction.batch_size),
-        feature_resize_size=int(base_config.feature_extraction.resize_size),
-        feature_crop_size=int(base_config.feature_extraction.crop_size),
         feature_mean=[float(x) for x in base_config.image.mean],
         feature_std=[float(x) for x in base_config.image.std],
         split_ratios=(
@@ -140,10 +130,21 @@ def _print_runtime_summary(runtime: PipelineRuntime, task_name: str, show_full_c
     print(f"Project root: {runtime.project_root}")
     print(f"Using device: {runtime.device}")
     print(f"Processed root: {runtime.processed_dir}")
-    print(f"Feature cache root: {runtime.feature_dir}")
     print(f"Strict sample mode: {runtime.strict_sample_mode}")
     print(f"Sample size: {runtime.sample_size} | split ratios: {runtime.split_ratios} | seed: {runtime.sample_seed}")
-    print(f"Download data: {runtime.download_data} | image mode: {runtime.image_download_mode} | pre-extract features: {runtime.pre_extract_features}")
+    print(f"Download data: {runtime.download_data} | image mode: {runtime.image_download_mode}")
+    strategy_name = str(getattr(runtime.task_config.model, "strategy", "baseline_cnn"))
+    backbone_name = getattr(runtime.task_config.backbone, "name", None)
+    summary_bits = [f"Strategy: {strategy_name}"]
+    if backbone_name:
+        summary_bits.append(f"backbone: {backbone_name}")
+    summary_bits.append(f"pretrained: {bool(runtime.task_config.backbone.pretrained)}")
+    summary_bits.append(f"freeze_backbone: {bool(runtime.task_config.backbone.freeze_backbone)}")
+    print(" | ".join(summary_bits))
+    preprocessing_config = _get_preprocessing_config(runtime.task_config)
+    default_preprocessing_strategy = "baseline_task2" if task_name == "relation" else "baseline_task1"
+    preprocessing_strategy = str(getattr(preprocessing_config, "strategy", default_preprocessing_strategy))
+    print(f"Preprocessing strategy: {preprocessing_strategy}")
     if show_full_config:
         print_config(runtime.base_config)
         print_config(runtime.task_config)
@@ -392,108 +393,6 @@ def _prepare_relation_split_files(runtime: PipelineRuntime, image_data: List[Dic
     return sample_image_ids
 
 
-def _ensure_task1_feature_cache(runtime: PipelineRuntime, input_mode: str) -> bool:
-    split_names = ["train", "val", "test"]
-    cache_ready = feature_cache_ready(runtime.feature_dir, split_names, input_mode)
-
-    if runtime.pre_extract_features and bool(runtime.task_config.dataset.use_feature_cache):
-        runtime.feature_dir.mkdir(parents=True, exist_ok=True)
-        _download_missing_images_for_splits(runtime, "Task 1", split_names)
-        print("Extracting task 1 features...")
-        for split_name in split_names:
-            output_path = cache_output(runtime.feature_dir, split_name, input_mode)
-            extract_object_features(
-                annotation_file=str(runtime.processed_dir / split_name / "annotations.json"),
-                image_dir=str(runtime.image_dir),
-                output_file=str(output_path),
-                backbone=str(runtime.task_config.backbone.name),
-                pretrained=bool(runtime.task_config.backbone.pretrained),
-                batch_size=runtime.feature_batch_size,
-                device=runtime.device,
-                resize_size=runtime.feature_resize_size,
-                crop_size=runtime.feature_crop_size,
-                mean=runtime.feature_mean,
-                std=runtime.feature_std,
-                input_mode=input_mode,
-            )
-        cache_ready = feature_cache_ready(runtime.feature_dir, split_names, input_mode)
-        if not cache_ready:
-            raise RuntimeError("Task 1 feature cache is empty after extraction.")
-        return True
-
-    if not cache_ready:
-        _download_missing_images_for_splits(runtime, "Task 1", split_names)
-    return cache_ready
-
-
-def _ensure_attribute_feature_cache(runtime: PipelineRuntime, input_mode: str) -> bool:
-    split_names = ["train", "val", "test"]
-    cache_ready = feature_cache_ready(runtime.feature_dir, split_names, input_mode)
-
-    if runtime.pre_extract_features and bool(runtime.task_config.dataset.use_feature_cache):
-        runtime.feature_dir.mkdir(parents=True, exist_ok=True)
-        _download_missing_images_for_splits(runtime, "Task 1", split_names)
-        print("Extracting attribute features...")
-        for split_name in split_names:
-            output_path = cache_output(runtime.feature_dir, split_name, input_mode)
-            extract_attribute_features(
-                annotation_file=str(runtime.processed_dir / split_name / "annotations.json"),
-                image_dir=str(runtime.image_dir),
-                output_file=str(output_path),
-                backbone=str(runtime.task_config.backbone.name),
-                pretrained=bool(runtime.task_config.backbone.pretrained),
-                batch_size=runtime.feature_batch_size,
-                device=runtime.device,
-                resize_size=runtime.feature_resize_size,
-                crop_size=runtime.feature_crop_size,
-                mean=runtime.feature_mean,
-                std=runtime.feature_std,
-                input_mode=input_mode,
-            )
-        cache_ready = feature_cache_ready(runtime.feature_dir, split_names, input_mode)
-        if not cache_ready:
-            raise RuntimeError("Task 1 feature cache is empty after extraction.")
-        return True
-
-    if not cache_ready:
-        _download_missing_images_for_splits(runtime, "Task 1", split_names)
-    return cache_ready
-
-
-def _ensure_relation_feature_cache(runtime: PipelineRuntime, input_mode: str) -> bool:
-    split_names = ["train", "val", "test"]
-    cache_ready = feature_cache_ready(runtime.feature_dir, split_names, input_mode)
-
-    if runtime.pre_extract_features and bool(runtime.task_config.dataset.use_feature_cache):
-        runtime.feature_dir.mkdir(parents=True, exist_ok=True)
-        _download_missing_images_for_splits(runtime, "Task 2", split_names)
-        print("Extracting relation features...")
-        for split_name in split_names:
-            output_path = cache_output(runtime.feature_dir, split_name, input_mode)
-            extract_relation_features(
-                annotation_file=str(runtime.processed_dir / split_name / "annotations.json"),
-                image_dir=str(runtime.image_dir),
-                output_file=str(output_path),
-                backbone=str(runtime.task_config.backbone.name),
-                pretrained=bool(runtime.task_config.backbone.pretrained),
-                batch_size=runtime.feature_batch_size,
-                device=runtime.device,
-                resize_size=runtime.feature_resize_size,
-                crop_size=runtime.feature_crop_size,
-                mean=runtime.feature_mean,
-                std=runtime.feature_std,
-                input_mode=input_mode,
-            )
-        cache_ready = feature_cache_ready(runtime.feature_dir, split_names, input_mode)
-        if not cache_ready:
-            raise RuntimeError("Task 2 feature cache is empty after extraction.")
-        return True
-
-    if not cache_ready:
-        _download_missing_images_for_splits(runtime, "Task 2", split_names)
-    return cache_ready
-
-
 def run_object_pipeline(
     base_config_path: str = "configs/config.yaml",
     task_config_path: str = "configs/object_config.yaml",
@@ -508,52 +407,62 @@ def run_object_pipeline(
     image_data = _prepare_raw_data(runtime, "Task 1")
     _prepare_object_attribute_split_files(runtime, image_data)
 
+    preprocessing_cfg = _get_preprocessing_config(runtime.task_config)
+    preprocessing_color_jitter_cfg = getattr(preprocessing_cfg, "color_jitter", None)
     object_input_mode = normalize_input_mode(str(runtime.task_config.dataset.object_input_mode))
-    object_learnable_backbone = bool(runtime.task_config.backbone.learnable_backbone)
-    object_use_cache = bool(runtime.task_config.dataset.use_feature_cache) and not object_learnable_backbone
-
-    cache_ready = _ensure_task1_feature_cache(runtime, object_input_mode) if object_use_cache else False
-    if not object_use_cache or not cache_ready:
-        _download_missing_images_for_splits(runtime, "Task 1", ["train", "val", "test"])
+    object_strategy = str(getattr(runtime.task_config.model, "strategy", "modern_cnn"))
+    object_preprocessing_strategy = str(getattr(preprocessing_cfg, "strategy", "baseline_task1"))
+    _download_missing_images_for_splits(runtime, "Task 1", ["train", "val", "test"])
 
     object_train_ds, object_val_ds, object_test_ds = build_object_datasets(
         processed_dir=str(runtime.processed_dir),
         image_dir=str(runtime.image_dir),
         roi_size=runtime.roi_size,
-        use_feature_cache=object_use_cache,
-        feature_cache_dir=str(runtime.feature_dir),
         input_mode=object_input_mode,
         max_samples=runtime.max_samples,
-        train_horizontal_flip_p=float(runtime.task_config.augmentation.random_horizontal_flip),
-        train_color_jitter=bool(runtime.task_config.augmentation.color_jitter.enabled),
-        train_brightness=float(runtime.task_config.augmentation.color_jitter.brightness),
-        train_contrast=float(runtime.task_config.augmentation.color_jitter.contrast),
-        train_saturation=float(runtime.task_config.augmentation.color_jitter.saturation),
-        train_hue=float(runtime.task_config.augmentation.color_jitter.hue),
-        train_random_erasing_p=float(runtime.task_config.augmentation.random_erasing_p),
-        train_resize_delta=int(runtime.task_config.augmentation.resize_delta),
+        train_horizontal_flip_p=float(getattr(preprocessing_cfg, "random_horizontal_flip", 0.5)),
+        train_color_jitter=bool(getattr(preprocessing_color_jitter_cfg, "enabled", False)),
+        train_brightness=float(getattr(preprocessing_color_jitter_cfg, "brightness", 0.2)),
+        train_contrast=float(getattr(preprocessing_color_jitter_cfg, "contrast", 0.2)),
+        train_saturation=float(getattr(preprocessing_color_jitter_cfg, "saturation", 0.2)),
+        train_hue=float(getattr(preprocessing_color_jitter_cfg, "hue", 0.1)),
+        train_random_erasing_p=float(getattr(preprocessing_cfg, "random_erasing_p", 0.0)),
+        train_resize_delta=int(getattr(preprocessing_cfg, "resize_delta", 32)),
+        preprocessing_strategy=object_preprocessing_strategy,
         mean=runtime.feature_mean,
         std=runtime.feature_std,
     )
 
-    object_model = ObjectClassifier(
+    object_model = build_object_classifier(
+        object_strategy,
         num_classes=object_train_ds.num_objects,
-        feature_dim=int(runtime.task_config.backbone.feature_dim),
+        pretrained=bool(runtime.task_config.backbone.pretrained),
+        freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
+        device=runtime.device,
         hidden_dim=int(runtime.task_config.model.object_hidden_dim),
         dropout=float(runtime.task_config.model.object_dropout),
         num_layers=int(runtime.task_config.model.object_num_layers),
-        backbone_name=str(runtime.task_config.backbone.name) if object_learnable_backbone else None,
-        pretrained=bool(runtime.task_config.backbone.pretrained),
-        freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
-        learnable_backbone=object_learnable_backbone,
-        device=runtime.device,
     )
 
-    object_optimizer = torch.optim.AdamW(
-        object_model.parameters(),
-        lr=float(runtime.task_config.training.lr),
-        weight_decay=float(runtime.task_config.training.weight_decay),
-    )
+    object_lr = float(runtime.task_config.training.lr)
+    object_weight_decay = float(runtime.task_config.training.weight_decay)
+    backbone_params = []
+    head_params = []
+    for name, parameter in object_model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        if name.startswith("encoder."):
+            backbone_params.append(parameter)
+        else:
+            head_params.append(parameter)
+
+    param_groups = []
+    if head_params:
+        param_groups.append({"params": head_params, "lr": object_lr, "weight_decay": object_weight_decay})
+    if backbone_params:
+        param_groups.append({"params": backbone_params, "lr": object_lr * 0.1, "weight_decay": object_weight_decay})
+
+    object_optimizer = torch.optim.AdamW(param_groups)
 
     loader_kwargs = _dataloader_kwargs(runtime)
     object_train_loader = DataLoader(object_train_ds, batch_size=int(runtime.task_config.training.batch_size), shuffle=True, **loader_kwargs)
@@ -567,7 +476,6 @@ def run_object_pipeline(
         optimizer=object_optimizer,
         use_auto_class_weights=True,
         freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
-        freeze_epochs=int(runtime.task_config.backbone.freeze_epochs),
         max_epochs=int(runtime.task_config.training.max_epochs),
         early_stopping_patience=int(runtime.task_config.training.early_stopping_patience),
         gradient_clip_val=float(runtime.task_config.training.gradient_clip_val),
@@ -590,7 +498,6 @@ def run_object_pipeline(
             train_metrics=train_metrics,
             test_metrics=test_metrics,
             processed_dir=str(runtime.processed_dir),
-            feature_dir=str(runtime.feature_dir),
         )
     finally:
         cleanup_cuda_memory(note="Object pipeline finished")
@@ -610,45 +517,41 @@ def run_attribute_pipeline(
     image_data = _prepare_raw_data(runtime, "Task 1")
     _prepare_object_attribute_split_files(runtime, image_data)
 
+    preprocessing_cfg = _get_preprocessing_config(runtime.task_config)
+    preprocessing_color_jitter_cfg = getattr(preprocessing_cfg, "color_jitter", None)
     attribute_input_mode = normalize_input_mode(str(runtime.task_config.dataset.attribute_input_mode))
-    attribute_learnable_backbone = bool(runtime.task_config.backbone.learnable_backbone)
-    attribute_use_cache = bool(runtime.task_config.dataset.use_feature_cache) and not attribute_learnable_backbone
-
-    cache_ready = _ensure_attribute_feature_cache(runtime, attribute_input_mode) if attribute_use_cache else False
-    if not attribute_use_cache or not cache_ready:
-        _download_missing_images_for_splits(runtime, "Task 1", ["train", "val", "test"])
+    attribute_preprocessing_strategy = str(getattr(preprocessing_cfg, "strategy", "baseline_task1"))
+    attribute_strategy = str(getattr(runtime.task_config.model, "strategy", "baseline_cnn"))
+    _download_missing_images_for_splits(runtime, "Task 1", ["train", "val", "test"])
 
     attribute_train_ds, attribute_val_ds, attribute_test_ds = build_attribute_datasets(
         processed_dir=str(runtime.processed_dir),
         image_dir=str(runtime.image_dir),
         roi_size=runtime.roi_size,
-        use_feature_cache=attribute_use_cache,
-        feature_cache_dir=str(runtime.feature_dir),
         input_mode=attribute_input_mode,
         max_samples=runtime.max_samples,
-        train_horizontal_flip_p=float(runtime.task_config.augmentation.random_horizontal_flip),
-        train_color_jitter=bool(runtime.task_config.augmentation.color_jitter.enabled),
-        train_brightness=float(runtime.task_config.augmentation.color_jitter.brightness),
-        train_contrast=float(runtime.task_config.augmentation.color_jitter.contrast),
-        train_saturation=float(runtime.task_config.augmentation.color_jitter.saturation),
-        train_hue=float(runtime.task_config.augmentation.color_jitter.hue),
-        train_random_erasing_p=float(runtime.task_config.augmentation.random_erasing_p),
-        train_resize_delta=int(runtime.task_config.augmentation.resize_delta),
+        train_horizontal_flip_p=float(getattr(preprocessing_cfg, "random_horizontal_flip", 0.5)),
+        train_color_jitter=bool(getattr(preprocessing_color_jitter_cfg, "enabled", False)),
+        train_brightness=float(getattr(preprocessing_color_jitter_cfg, "brightness", 0.2)),
+        train_contrast=float(getattr(preprocessing_color_jitter_cfg, "contrast", 0.2)),
+        train_saturation=float(getattr(preprocessing_color_jitter_cfg, "saturation", 0.2)),
+        train_hue=float(getattr(preprocessing_color_jitter_cfg, "hue", 0.1)),
+        train_random_erasing_p=float(getattr(preprocessing_cfg, "random_erasing_p", 0.0)),
+        train_resize_delta=int(getattr(preprocessing_cfg, "resize_delta", 32)),
+        preprocessing_strategy=attribute_preprocessing_strategy,
         mean=runtime.feature_mean,
         std=runtime.feature_std,
     )
 
-    attribute_model = AttributeClassifier(
+    attribute_model = build_attribute_classifier(
+        attribute_strategy,
         num_attributes=attribute_train_ds.num_attributes,
-        feature_dim=int(runtime.task_config.backbone.feature_dim),
+        pretrained=bool(runtime.task_config.backbone.pretrained),
+        freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
+        device=runtime.device,
         hidden_dim=int(runtime.task_config.model.attribute_hidden_dim),
         dropout=float(runtime.task_config.model.attribute_dropout),
         num_layers=int(runtime.task_config.model.attribute_num_layers),
-        backbone_name=str(runtime.task_config.backbone.name) if attribute_learnable_backbone else None,
-        pretrained=bool(runtime.task_config.backbone.pretrained),
-        freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
-        learnable_backbone=attribute_learnable_backbone,
-        device=runtime.device,
     )
 
     attribute_optimizer = torch.optim.AdamW(
@@ -674,7 +577,6 @@ def run_attribute_pipeline(
         attribute_threshold_min=float(runtime.task_config.eval.attribute_threshold_min),
         attribute_threshold_max=float(runtime.task_config.eval.attribute_threshold_max),
         freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
-        freeze_epochs=int(runtime.task_config.backbone.freeze_epochs),
         max_epochs=int(runtime.task_config.training.max_epochs),
         early_stopping_patience=int(runtime.task_config.training.early_stopping_patience),
         gradient_clip_val=float(runtime.task_config.training.gradient_clip_val),
@@ -697,7 +599,6 @@ def run_attribute_pipeline(
             train_metrics=train_metrics,
             test_metrics=test_metrics,
             processed_dir=str(runtime.processed_dir),
-            feature_dir=str(runtime.feature_dir),
         )
     finally:
         cleanup_cuda_memory(note="Attribute pipeline finished")
@@ -717,49 +618,44 @@ def run_relation_pipeline(
     image_data = _prepare_raw_data(runtime, "Task 2")
     _prepare_relation_split_files(runtime, image_data)
 
+    preprocessing_cfg = _get_preprocessing_config(runtime.task_config)
+    preprocessing_color_jitter_cfg = getattr(preprocessing_cfg, "color_jitter", None)
     relation_input_mode = normalize_input_mode(str(runtime.task_config.dataset.input_mode))
-    relation_learnable_backbone = bool(runtime.task_config.backbone.learnable_backbone)
-    relation_use_cache = bool(runtime.task_config.dataset.use_feature_cache) and not relation_learnable_backbone
-
-    cache_ready = _ensure_relation_feature_cache(runtime, relation_input_mode) if relation_use_cache else False
-    if not relation_use_cache or not cache_ready:
-        _download_missing_images_for_splits(runtime, "Task 2", ["train", "val", "test"])
+    relation_strategy = str(getattr(runtime.task_config.model, "strategy", "baseline_cnn"))
+    relation_preprocessing_strategy = str(getattr(preprocessing_cfg, "strategy", "baseline_task2"))
+    _download_missing_images_for_splits(runtime, "Task 2", ["train", "val", "test"])
 
     relation_train_ds, relation_val_ds, relation_test_ds = build_relation_datasets(
         processed_dir=str(runtime.processed_dir),
         image_dir=str(runtime.image_dir),
         roi_size=runtime.roi_size,
-        use_feature_cache=relation_use_cache,
         use_spatial_features=bool(runtime.task_config.spatial.use_spatial_features),
-        feature_cache_dir=str(runtime.feature_dir),
         input_mode=relation_input_mode,
         max_samples=runtime.max_samples,
-        train_horizontal_flip_p=float(runtime.task_config.augmentation.random_horizontal_flip),
-        train_color_jitter=bool(runtime.task_config.augmentation.color_jitter.enabled),
-        train_brightness=float(runtime.task_config.augmentation.color_jitter.brightness),
-        train_contrast=float(runtime.task_config.augmentation.color_jitter.contrast),
-        train_saturation=float(runtime.task_config.augmentation.color_jitter.saturation),
-        train_hue=float(runtime.task_config.augmentation.color_jitter.hue),
-        train_random_erasing_p=float(runtime.task_config.augmentation.random_erasing_p),
-        train_resize_delta=int(runtime.task_config.augmentation.resize_delta),
+        train_horizontal_flip_p=float(getattr(preprocessing_cfg, "random_horizontal_flip", 0.0)),
+        train_color_jitter=bool(getattr(preprocessing_color_jitter_cfg, "enabled", False)),
+        train_brightness=float(getattr(preprocessing_color_jitter_cfg, "brightness", 0.2)),
+        train_contrast=float(getattr(preprocessing_color_jitter_cfg, "contrast", 0.2)),
+        train_saturation=float(getattr(preprocessing_color_jitter_cfg, "saturation", 0.1)),
+        train_hue=float(getattr(preprocessing_color_jitter_cfg, "hue", 0.05)),
+        train_random_erasing_p=float(getattr(preprocessing_cfg, "random_erasing_p", 0.0)),
+        train_resize_delta=int(getattr(preprocessing_cfg, "resize_delta", 0)),
+        preprocessing_strategy=relation_preprocessing_strategy,
         mean=runtime.feature_mean,
         std=runtime.feature_std,
     )
 
-    relation_model = RelationClassifier(
+    relation_model = build_relation_classifier(
+        relation_strategy,
         num_relations=relation_train_ds.num_relations,
-        feature_dim=int(runtime.task_config.backbone.feature_dim),
         spatial_dim=int(runtime.task_config.spatial.spatial_dim),
+        pretrained=bool(runtime.task_config.backbone.pretrained),
+        freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
+        device=runtime.device,
         hidden_dim=int(runtime.task_config.model.hidden_dim),
         dropout=float(runtime.task_config.model.dropout),
         num_layers=int(runtime.task_config.model.num_layers),
         attention_heads=int(runtime.task_config.model.attention_heads),
-        fusion_method=str(runtime.task_config.model.fusion_method),
-        backbone_name=str(runtime.task_config.backbone.name) if relation_learnable_backbone else None,
-        pretrained=bool(runtime.task_config.backbone.pretrained),
-        freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
-        learnable_backbone=relation_learnable_backbone,
-        device=runtime.device,
     )
 
     relation_optimizer = torch.optim.AdamW(
@@ -781,7 +677,6 @@ def run_relation_pipeline(
         label_smoothing=float(runtime.task_config.loss.label_smoothing),
         use_auto_class_weights=True,
         freeze_backbone=bool(runtime.task_config.backbone.freeze_backbone),
-        freeze_epochs=int(runtime.task_config.backbone.freeze_epochs),
         max_epochs=int(runtime.task_config.training.max_epochs),
         early_stopping_patience=int(runtime.task_config.training.early_stopping_patience),
         gradient_clip_val=float(runtime.task_config.training.gradient_clip_val),
@@ -803,7 +698,6 @@ def run_relation_pipeline(
             train_metrics=train_metrics,
             test_metrics=test_metrics,
             processed_dir=str(runtime.processed_dir),
-            feature_dir=str(runtime.feature_dir),
         )
     finally:
         cleanup_cuda_memory(note="Relation pipeline finished")

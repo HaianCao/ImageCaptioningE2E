@@ -24,21 +24,20 @@ class ObjectClassifier(BaseModel):
     def __init__(
         self,
         num_classes: int,
-        feature_dim: int = 2048,
+        feature_dim: Optional[int] = None,
         hidden_dim: int = 512,
         dropout: float = 0.3,
         num_layers: int = 2,
         backbone_name: Optional[str] = None,
         pretrained: bool = True,
         freeze_backbone: bool = False,
-        learnable_backbone: bool = False,
         device: str = "cuda"
     ):
         super().__init__(device)
 
         self.num_classes = num_classes
         self.feature_dim = feature_dim
-        self.learnable_backbone = bool(learnable_backbone or backbone_name)
+        self.learnable_backbone = backbone_name is not None
         self.backbone_name = backbone_name
         self.encoder: Optional[VisualEncoder] = None
         self.feature_projection: Optional[nn.Module] = None
@@ -62,16 +61,22 @@ class ObjectClassifier(BaseModel):
                 input_dim = feature_dim
             self.feature_dim = input_dim
         else:
-            input_dim = feature_dim
+            input_dim = feature_dim if feature_dim is not None else 2048
+            self.feature_dim = input_dim
 
-        layers = []
+        layers = [nn.LayerNorm(input_dim)]
         current_dim = input_dim
-        for layer_idx in range(num_layers - 1):
-            layers.append(nn.Linear(current_dim, hidden_dim))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout))
-            current_dim = hidden_dim
-        layers.append(nn.Linear(current_dim, num_classes))
+        if num_layers == 1:
+            layers.append(nn.Linear(current_dim, num_classes))
+        else:
+            for layer_idx in range(num_layers - 1):
+                layers.append(nn.Linear(current_dim, hidden_dim))
+                layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
+                current_dim = hidden_dim
+                if layer_idx < num_layers - 2:
+                    layers.append(nn.LayerNorm(current_dim))
+            layers.append(nn.Linear(current_dim, num_classes))
 
         self.classifier = nn.Sequential(*layers)
 

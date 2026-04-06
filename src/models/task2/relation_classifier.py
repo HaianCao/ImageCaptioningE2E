@@ -24,7 +24,7 @@ class RelationClassifier(BaseModel):
     def __init__(
         self,
         num_relations: int,
-        feature_dim: int = 2048,
+        feature_dim: Optional[int] = None,
         spatial_dim: int = 9,
         hidden_dim: int = 512,
         dropout: float = 0.3,
@@ -34,7 +34,6 @@ class RelationClassifier(BaseModel):
         backbone_name: Optional[str] = None,
         pretrained: bool = True,
         freeze_backbone: bool = False,
-        learnable_backbone: bool = False,
         device: str = "cuda"
     ):
         super().__init__(device)
@@ -43,7 +42,7 @@ class RelationClassifier(BaseModel):
         self.feature_dim = feature_dim
         self.spatial_dim = spatial_dim
         self.fusion_method = fusion_method
-        self.learnable_backbone = bool(learnable_backbone or backbone_name)
+        self.learnable_backbone = backbone_name is not None
         self.backbone_name = backbone_name
         self.encoder: Optional[VisualEncoder] = None
         self.feature_projection: Optional[nn.Module] = None
@@ -66,6 +65,8 @@ class RelationClassifier(BaseModel):
                 self.feature_projection = nn.Linear(encoded_dim, feature_dim)
                 encoded_dim = feature_dim
             self.feature_dim = encoded_dim
+        else:
+            self.feature_dim = feature_dim if feature_dim is not None else 2048
 
         # Feature fusion
         if fusion_method == "concat":

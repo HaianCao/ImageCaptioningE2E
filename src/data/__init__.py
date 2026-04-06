@@ -2,6 +2,16 @@
 
 from .download import download_and_extract_metadata, download_vg_images, verify_download
 from .dataset import BaseVGDataset
+from .preprocessing_strategies import (
+	PREPROCESSING_STRATEGY_REGISTRY,
+	PreprocessingPreset,
+	PreprocessingStrategy,
+	Task1PreprocessingStrategy,
+	Task2PreprocessingStrategy,
+	build_preprocessing_preset,
+	get_preprocessing_strategy,
+	register_preprocessing_strategy,
+)
 from .task2_dataset import RelationshipDataset
 from .object_dataset import build_object_datasets
 from .attribute_dataset import build_attribute_datasets

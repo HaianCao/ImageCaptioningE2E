@@ -24,21 +24,20 @@ class AttributeClassifier(BaseModel):
     def __init__(
         self,
         num_attributes: int,
-        feature_dim: int = 2048,
+        feature_dim: Optional[int] = None,
         hidden_dim: int = 512,
         dropout: float = 0.3,
         num_layers: int = 2,
         backbone_name: Optional[str] = None,
         pretrained: bool = True,
         freeze_backbone: bool = False,
-        learnable_backbone: bool = False,
         device: str = "cuda"
     ):
         super().__init__(device)
 
         self.num_attributes = num_attributes
         self.feature_dim = feature_dim
-        self.learnable_backbone = bool(learnable_backbone or backbone_name)
+        self.learnable_backbone = backbone_name is not None
         self.backbone_name = backbone_name
         self.encoder: Optional[VisualEncoder] = None
         self.feature_projection: Optional[nn.Module] = None
@@ -62,7 +61,8 @@ class AttributeClassifier(BaseModel):
                 input_dim = feature_dim
             self.feature_dim = input_dim
         else:
-            input_dim = feature_dim
+            input_dim = feature_dim if feature_dim is not None else 2048
+            self.feature_dim = input_dim
 
         layers = []
         current_dim = input_dim

@@ -2,77 +2,144 @@
 # Relation Configuration
 # ============================================================
 
-task: "relation"  # Explicit identifier for the relation pipeline
+task: "relation"
+# This file is dedicated to the relation pipeline.
+# Keep this value as relation so shared loaders resolve the correct task-specific settings.
 
-# ── Visual Backbone ────────────────────────────────────────
-# Options: "resnet50", "resnet101", "efficientnet_b3",
-#          "efficientnet_b5", "vit_base_16", "vit_large_16"
+# ── Backbone Runtime Flags ─────────────────────────────────
+# The actual backbone architecture is selected by model.strategy.
+# These flags only control how the selected backbone is initialized and trained.
 backbone:
-  name: "resnet50"  # Backbone architecture used for pairwise feature extraction
-  pretrained: true  # Load pretrained weights for the backbone
-  learnable_backbone: true  # Attach the backbone directly inside the model when true
-  freeze_backbone: false  # Freeze backbone weights during training when true
-  freeze_epochs: 0  # Number of epochs to keep the backbone frozen before unfreezing
-  feature_dim: 2048           # Output feature dimension per region
+  # Load pretrained weights for the selected backbone.
+  # Set false when training from scratch or when you want to avoid pretrained initialization.
+  pretrained: true
+  # Freeze the selected backbone during training.
+  # Set true to train only the relation head.
+  freeze_backbone: false
 
 # ── Dataset ────────────────────────────────────────────────
 dataset:
-  processed_dir: "data/processed/relation"  # Processed relation annotations and vocabularies
-  feature_cache_dir: "features"  # Relative cache folder for pre-extracted features
-  use_feature_cache: true  # Read cached features instead of raw images
-  input_mode: "rgb"  # Relation pipeline input mode: rgb, gray, or contour
+  # Directory containing processed relation annotations and vocabularies.
+  # This is usually a repository-relative path, but an absolute path also works.
+  processed_dir: "data/processed/relation"
+  # Input representation for the cropped union ROI before augmentation.
+  # Supported canonical values:
+  # - rgb: keep the ROI in RGB color.
+  # - gray: convert to grayscale and expand back to 3 channels.
+  # - contour: convert to a Canny edge map and expand back to 3 channels.
+  # Accepted aliases:
+  # - grayscale, grey -> gray
+  # - edge, edges -> contour
+  input_mode: "rgb"
 
 # ── Label Space ────────────────────────────────────────────
 labels:
-  relation_vocab_file: "data/processed/relation/relation_vocab.json"  # Relation vocabulary file generated during preprocessing
-  max_relations: 100          # Keep the top-N most frequent relation types
-  predicate_vocab_file: "data/processed/relation/predicate_vocab.json"  # Raw predicate vocabulary file path
+  # Relation vocabulary file generated during preprocessing.
+  # This is the vocabulary used by the training and evaluation pipeline.
+  relation_vocab_file: "data/processed/relation/relation_vocab.json"
+  # Keep only the top-N most frequent relation types during preprocessing.
+  max_relations: 100
+  # Raw predicate vocabulary file path retained for compatibility with older preprocessing helpers.
+  predicate_vocab_file: "data/processed/relation/predicate_vocab.json"
 
 # ── Spatial Features ───────────────────────────────────────
 spatial:
-  use_spatial_features: true   # Append geometric features to the visual pair representation
-  # Features: [x1,y1,x2,y2 (normalized)] x2 for each bbox + IoU + distance = 9 dims
-  spatial_dim: 9  # Number of spatial features per relationship pair
+  # Append geometric features to the visual pair representation.
+  # Set false if you want to train using only visual union ROI features.
+  use_spatial_features: true
+  # Number of spatial features per relationship pair.
+  # The current implementation uses 9 dimensions: normalized subject box, normalized object box, and IoU.
+  spatial_dim: 9
 
 # ── Model Architecture ─────────────────────────────────────
 model:
-  # Fusion strategy: "concat", "attention", "gated"
-  fusion_method: "concat"  # Feature fusion strategy used before classification
-  # Input dim = feature_dim * 2 + spatial_dim (if use_spatial_features)
-  hidden_dim: 1024  # Hidden width of the relation MLP head
-  dropout: 0.4  # Dropout rate used in the relation head
-  num_layers: 2               # Number of linear layers in the relation head
-  attention_heads: 8          # Number of attention heads when using attention fusion
+  # Registered relation model strategy.
+  # Supported values:
+  # - baseline_cnn: ResNet-50 baseline preset with concat fusion.
+  # - modern_cnn: ConvNeXtV2-Tiny preset with concat fusion and the recommended default.
+  # - efficientnetv2_s: EfficientNetV2-S preset with concat fusion.
+  # - transformer: Swin-Tiny preset with attention fusion.
+  # Compatibility aliases:
+  # - resnet50 -> baseline_cnn
+  # - convnextv2_tiny -> modern_cnn
+  # - swin_tiny_patch4_window7_224 -> transformer
+  # The registry is extensible, so custom strategy names can be registered later.
+  strategy: "baseline_cnn"
+  # Hidden width of the relation MLP head after the visual/spatial fusion step.
+  hidden_dim: 1024
+  # Dropout rate used inside the relation head.
+  dropout: 0.4
+  # Number of linear layers in the relation head.
+  # 1 means a single linear classifier on top of the fused representation.
+  num_layers: 2
+  # Number of attention heads when the selected strategy uses attention fusion.
+  # This value is ignored by concat-based presets.
+  attention_heads: 8
 
 # ── Loss ───────────────────────────────────────────────────
 loss:
-  label_smoothing: 0.1        # Cross-entropy label smoothing factor
+  # Cross-entropy label smoothing factor.
+  # Use 0.0 to disable smoothing.
+  label_smoothing: 0.1
 
 # ── Training Overrides ─────────────────────────────────────
 training:
-  batch_size: 256  # Batch size used by relation DataLoaders; cached features make larger batches feasible
-  num_workers: 2  # Number of DataLoader workers for the relation pipeline
-  pin_memory: true  # Pin host memory only when CUDA is available
-  max_epochs: 35  # Maximum relation training epochs
-  early_stopping_patience: 5  # Stop after this many non-improving validation epochs
-  gradient_clip_val: 1.0  # Maximum gradient norm used for clipping
-  log_every_n_steps: 0  # Batch logging frequency; set 0 to disable batch-step logs
-  lr: 3.0e-4  # Learning rate for relation optimizer
-  weight_decay: 1.0e-4  # L2 regularization strength for relation optimizer
+  # Batch size used by relation DataLoaders.
+  # Increase it if your GPU memory allows; reduce it for smaller cards.
+  batch_size: 256
+  # Number of DataLoader workers for relation training.
+  num_workers: 2
+  # Pin host memory only when CUDA is available.
+  pin_memory: true
+  # Maximum number of training epochs.
+  max_epochs: 35
+  # Stop training after this many validation epochs without improvement.
+  early_stopping_patience: 5
+  # Maximum gradient norm used for clipping.
+  gradient_clip_val: 1.0
+  # Batch-step logging frequency; set 0 to disable per-step logs.
+  log_every_n_steps: 0
+  # Base learning rate for the relation optimizer.
+  # The current pipeline applies it to all trainable parameters.
+  lr: 3.0e-4
+  # L2 regularization strength for AdamW.
+  weight_decay: 1.0e-4
 
-# ── Data Augmentation ──────────────────────────────────────
-augmentation:
-  resize_delta: 0  # Keep relation crop aligned with spatial features
-  random_horizontal_flip: 0.0   # Disabled: flip would desync visual and spatial features
+# ── Preprocessing ─────────────────────────────────────────
+preprocessing:
+  # Registered preprocessing preset for task 2.
+  # Supported values:
+  # - baseline_task2: canonical relation preprocessing preset with geometry-safe defaults.
+  # - baseline_relation: alias of baseline_task2 kept for relation-specific readability.
+  # The registry can also accept custom names if you register another strategy later.
+  strategy: "baseline_task2"
+  # Extra pixels added before the crop step.
+  # The relation preset keeps this at 0 to preserve geometry alignment.
+  resize_delta: 0
+  # Probability of horizontally flipping the ROI.
+  # The relation preset keeps this at 0.0 because flipping can desync visual and spatial features.
+  random_horizontal_flip: 0.0
   color_jitter:
-    enabled: false  # Disabled by default; relation uses geometry-sensitive inputs
-    brightness: 0.2  # Brightness jitter magnitude
-    contrast: 0.2  # Contrast jitter magnitude
-    saturation: 0.1  # Saturation jitter magnitude
-    hue: 0.05  # Hue jitter magnitude
-  random_erasing_p: 0.0  # Probability of applying random erasing
+    # Enable or disable color jitter.
+    # The relation preset leaves this disabled by default because geometry-sensitive inputs are more fragile.
+    enabled: false
+    # Brightness jitter magnitude.
+    brightness: 0.2
+    # Contrast jitter magnitude.
+    contrast: 0.2
+    # Saturation jitter magnitude.
+    saturation: 0.1
+    # Hue jitter magnitude.
+    hue: 0.05
+  # Probability of random erasing after normalization.
+  # Set to 0.0 to disable it.
+  random_erasing_p: 0.0
 
 # ── Evaluation ─────────────────────────────────────────────
 eval:
-  relation_top_k: [1, 3, 5]  # Top-k values reported for relation accuracy
-  iou_threshold: 0.5         # Minimum IoU required for a valid relationship pair
+  # Top-k values reported for relation accuracy.
+  # Any list of positive integers is accepted.
+  relation_top_k: [1, 3, 5]
+  # Minimum IoU required for a valid relationship pair.
+  # Use a value in the range [0, 1].
+  iou_threshold: 0.5

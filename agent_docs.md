@@ -70,6 +70,8 @@
 - `src/data/task1_dataset.py`
 - `src/data/task2_dataset.py`
 - `src/features/feature_extractor.py`
+- `src/models/attribute/`
+- `src/models/relation/`
 - `src/models/task1/`
 - `src/models/task2/`
 
@@ -77,7 +79,10 @@
 
 ## 3. Ghi chú kỹ thuật
 - `VisualGenomeE2EModel` chỉ load ba checkpoint object/attribute/relation, không phải joint multi-task model.
-- Feature cache nằm dưới từng processed dir trong thư mục `features/`.
+- Public training pipelines hiện chạy trực tiếp trên ROI image, không còn bước pre-extract feature cho object/attribute/relation.
+- Object model hiện có registry strategy qua `object.model.strategy` (`modern_cnn`, `baseline_cnn`, `transformer`, ...); thêm strategy mới chỉ cần register class mới.
+- Attribute model cũng có registry strategy qua `attribute.model.strategy`; relation model cũng có registry strategy qua `relation.model.strategy`.
+- Preprocessing cũng có registry strategy qua `preprocessing.strategy`; task1 dùng `baseline_task1`, task2 dùng `baseline_task2`, và các decorator chỉ nên chia tách khi output contract khác nhau.
 - `pipeline.training_mode` chấp nhận `object`, `attribute`, `relation`, `all`, `e2e`; alias cũ `task1`, `task2`, `both` vẫn còn cho tương thích.
 - Nếu thêm import hoặc notebook mới, đừng dùng tên legacy làm public API mới.
 - Tài liệu user-facing phải khớp với naming `object`/`attribute`/`relation`, còn `task1`/`task2` chỉ xuất hiện khi cần backwards compatibility.
