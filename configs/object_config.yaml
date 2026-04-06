@@ -39,16 +39,22 @@ loss:
 
 # ── Training Overrides ─────────────────────────────────────
 training:
-  batch_size: 512  # Batch size used by the object DataLoader; cached features make larger batches feasible
+  batch_size: 256  # Batch size used by the object DataLoader; cached features make larger batches feasible
+  num_workers: 2  # Number of DataLoader workers for the object pipeline
+  pin_memory: true  # Pin host memory only when CUDA is available
   max_epochs: 40  # Maximum object training epochs
+  early_stopping_patience: 5  # Stop after this many non-improving validation epochs
+  gradient_clip_val: 1.0  # Maximum gradient norm used for clipping
+  log_every_n_steps: 0  # Batch logging frequency; set 0 to disable batch-step logs
   lr: 5.0e-4  # Learning rate for the object optimizer
+  weight_decay: 1.0e-4  # L2 regularization strength for the object optimizer
 
 # ── Data Augmentation ──────────────────────────────────────
 augmentation:
   resize_delta: 32  # Extra pixels added before random crop
   random_horizontal_flip: 0.5  # Probability of horizontally flipping the ROI
   color_jitter:
-    enabled: true  # Enable or disable color jitter
+    enabled: false  # Disabled by default; ROI data is already large enough
     brightness: 0.2  # Brightness jitter magnitude
     contrast: 0.2  # Contrast jitter magnitude
     saturation: 0.2  # Saturation jitter magnitude

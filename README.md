@@ -12,7 +12,7 @@ The repository is organized around three independent public pipelines:
 
 Each pipeline has its own notebook, task-specific YAML config, trainer, and checkpoint flow. Object and attribute are separate tasks. Shared preprocessing and feature code still uses `task1`/`task2` names in a compatibility layer, but new entry points should use `object`, `attribute`, and `relation`.
 
-The recommended entry points are [notebooks/object_pipeline.ipynb](notebooks/object_pipeline.ipynb), [notebooks/attribute_pipeline.ipynb](notebooks/attribute_pipeline.ipynb), [notebooks/relation_pipeline.ipynb](notebooks/relation_pipeline.ipynb), and [notebooks/e2e_wrapper.ipynb](notebooks/e2e_wrapper.ipynb). [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) remains available as the legacy combined workflow.
+The recommended entry points are [notebooks/object_pipeline.ipynb](notebooks/object_pipeline.ipynb), [notebooks/attribute_pipeline.ipynb](notebooks/attribute_pipeline.ipynb), [notebooks/relation_pipeline.ipynb](notebooks/relation_pipeline.ipynb), and [notebooks/e2e_wrapper.ipynb](notebooks/e2e_wrapper.ipynb). [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) remains available as a thin legacy wrapper around the shared pipeline runner.
 
 Configuration is split across:
 
@@ -38,7 +38,7 @@ pip install -r requirements.txt
 
 3. Run one of the split notebooks for the pipeline you want to work on, or [notebooks/e2e_wrapper.ipynb](notebooks/e2e_wrapper.ipynb) to load checkpoints and run the caption demo.
 
-4. Open [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) only if you want the legacy combined workflow.
+4. Open [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) only if you want the legacy combined wrapper over the shared pipeline runner.
 
 5. Edit the YAML configs, not the notebook, for the main runtime controls.
 
@@ -92,6 +92,7 @@ prj/
 │   ├── e2e_wrapper.ipynb
 │   └── complete_pipeline.ipynb
 └── src/
+    ├── pipelines/
     ├── data/
     ├── evaluation/
     ├── features/

@@ -28,8 +28,8 @@ class BaseModel(nn.Module, ABC):
 
     def __init__(self, device: str = "cuda"):
         super().__init__()
-        self.device = device
-        self.to(device)
+        self.device = device if not str(device).startswith("cuda") or torch.cuda.is_available() else "cpu"
+        self.to(self.device)
 
     @abstractmethod
     def forward(self, *args, **kwargs) -> Any:

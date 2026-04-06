@@ -19,7 +19,7 @@ from typing import Optional, List, Dict, Tuple
 from PIL import Image
 
 from .dataset import BaseVGDataset, load_vocab, load_json
-from .transforms import get_train_transforms, get_val_transforms
+from .transforms import get_relation_train_transforms, get_val_transforms
 
 
 def _normalize_input_mode(input_mode: str) -> str:
@@ -333,12 +333,10 @@ def build_task2_datasets(
     relation_vocab = load_vocab(str(proc_path / "relation_vocab.json"))
     input_mode = _normalize_input_mode(input_mode)
 
-    train_transform = get_train_transforms(
+    train_transform = get_relation_train_transforms(
         roi_size=roi_size,
         mean=mean,
         std=std,
-        resize_delta=train_resize_delta,
-        horizontal_flip_p=train_horizontal_flip_p,
         color_jitter=train_color_jitter,
         brightness=train_brightness,
         contrast=train_contrast,

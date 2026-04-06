@@ -88,7 +88,7 @@ class BaseTrainer(ABC):
         self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
 
         # Move model to device
-        self.model.to(device)
+        self.model.to(self.device)
 
     def train(self) -> Dict[str, Any]:
         """
@@ -241,6 +241,9 @@ class BaseTrainer(ABC):
                 preds, targets = self._get_predictions_and_targets(batch)
                 all_preds.append(preds)
                 all_targets.append(targets)
+
+        if num_batches == 0:
+            return {"val_loss": 0.0}
 
         # Compute metrics
         val_metrics = self._get_metrics(all_preds, all_targets)

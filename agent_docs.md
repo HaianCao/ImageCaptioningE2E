@@ -12,7 +12,7 @@
 ✅ **Đã xác nhận**:
 - `get_errors` trên workspace hiện trả về no errors.
 - [notebooks/object_pipeline.ipynb](notebooks/object_pipeline.ipynb), [notebooks/attribute_pipeline.ipynb](notebooks/attribute_pipeline.ipynb), [notebooks/relation_pipeline.ipynb](notebooks/relation_pipeline.ipynb), và [notebooks/e2e_wrapper.ipynb](notebooks/e2e_wrapper.ipynb) là các entry point public hiện tại.
-- [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) vẫn tồn tại như workflow legacy và đã được làm sạch output.
+- [notebooks/complete_pipeline.ipynb](notebooks/complete_pipeline.ipynb) vẫn tồn tại như wrapper legacy rất mỏng quanh shared pipeline runner.
 - [README.md](README.md) đã bỏ tham chiếu tới notebook không tồn tại như `01_eda.ipynb`.
 - Object và attribute dùng config/model/trainer riêng; shared preprocessing vẫn giữ `task1`/`task2` chỉ ở tầng compatibility.
 - Config public hiện tại là:
@@ -39,7 +39,7 @@
 - `notebooks/attribute_pipeline.ipynb`
 - `notebooks/relation_pipeline.ipynb`
 - `notebooks/e2e_wrapper.ipynb`
-- `notebooks/complete_pipeline.ipynb`
+- `notebooks/complete_pipeline.ipynb` (legacy wrapper)
 
 ### 2.2. Config
 - `configs/config.yaml`: global settings, runtime controls, sampling, logging.

@@ -33,33 +33,6 @@ split:
   val: 0.15  # Proportion of data assigned to validation
   test: 0.15  # Proportion of data assigned to test
 
-# ── General Training ───────────────────────────────────────
-training:
-  batch_size: 512  # Default batch size for training DataLoaders
-  num_workers: 4  # Number of DataLoader worker processes; 2 is a safer Colab default than 0
-  pin_memory: true  # Pin host memory to speed up CPU->GPU transfer
-  max_epochs: 30  # Maximum number of training epochs
-  early_stopping_patience: 5  # Stop after this many non-improving validation epochs
-  gradient_clip_val: 1.0  # Maximum gradient norm used for clipping
-  log_every_n_steps: 0  # Batch logging frequency; set 0 to disable batch-step logs
-
-# ── Optimizer ──────────────────────────────────────────────
-optimizer:
-  name: "adamw"          # Optimizer algorithm: "adam", "adamw", or "sgd"
-  lr: 1.0e-4  # Initial learning rate
-  weight_decay: 1.0e-4  # L2 regularization strength
-
-# ── LR Scheduler ───────────────────────────────────────────
-scheduler:
-  name: "cosine"         # LR scheduler policy: "cosine", "step", or "plateau"
-  warmup_epochs: 2  # Warmup epochs before the main LR schedule starts
-
-# ── Logging ────────────────────────────────────────────────
-logging:
-  use_tensorboard: true  # Write TensorBoard events during training
-  use_wandb: false  # Enable Weights & Biases logging
-  wandb_project: "vg-caption"  # W&B project name when logging is enabled
-
 # ── Runtime / Notebook Controls ────────────────────────────
 pipeline:
   training_mode: "all"  # Pipeline scope: "object", "attribute", "relation", "all", or "e2e" (legacy: "task1", "task2", "both")

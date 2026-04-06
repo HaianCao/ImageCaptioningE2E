@@ -81,8 +81,8 @@ class FeatureExtractor(nn.Module):
         super().__init__()
 
         self.backbone_name = backbone
-        self.device = device
-        self.use_amp = str(device).startswith("cuda")
+        self.device = device if not str(device).startswith("cuda") or torch.cuda.is_available() else "cpu"
+        self.use_amp = str(self.device).startswith("cuda") and torch.cuda.is_available()
         self.input_mode = _normalize_input_mode(input_mode)
         self.preserve_full_roi = preserve_full_roi
 
@@ -103,7 +103,7 @@ class FeatureExtractor(nn.Module):
             self.backbone.head = nn.Linear(self.feature_dim, feature_dim)
             self.feature_dim = feature_dim
 
-        self.backbone.to(device)
+        self.backbone.to(self.device)
         self.backbone.eval()
 
         # Image preprocessing
