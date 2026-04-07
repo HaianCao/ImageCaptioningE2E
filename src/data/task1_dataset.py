@@ -109,6 +109,12 @@ class ObjectAttributeDataset(BaseVGDataset):
         self.annotation_file = Path(annotation_file)
         self._load_annotations()
 
+        missing_image_count, removed_sample_count = self._filter_samples_with_available_images()
+        if removed_sample_count > 0:
+            print(
+                f"[ObjectAttributeDataset] Bỏ qua {removed_sample_count} samples từ {missing_image_count} ảnh thiếu local"
+            )
+
         # Giới hạn samples nếu cần
         if max_samples and max_samples < len(self.samples):
             self.samples = self.samples[:max_samples]

@@ -102,6 +102,29 @@ class BaseVGDataset(Dataset, ABC):
 
         return image
 
+    def _filter_samples_with_available_images(self) -> tuple[int, int]:
+        """Drop samples whose image files are missing and return counts for logging."""
+        if not self.samples:
+            return 0, 0
+
+        unique_image_ids = {sample["image_id"] for sample in self.samples if "image_id" in sample}
+        available_image_ids = set()
+
+        for image_id in unique_image_ids:
+            image_path = self.image_dir / f"{image_id}.jpg"
+            if _path_exists_safely(image_path):
+                available_image_ids.add(image_id)
+
+        if len(available_image_ids) == len(unique_image_ids):
+            return 0, 0
+
+        original_sample_count = len(self.samples)
+        self.samples = [sample for sample in self.samples if sample.get("image_id") in available_image_ids]
+
+        missing_image_count = len(unique_image_ids) - len(available_image_ids)
+        removed_sample_count = original_sample_count - len(self.samples)
+        return missing_image_count, removed_sample_count
+
     def _crop_roi(
         self,
         image: Image.Image,
