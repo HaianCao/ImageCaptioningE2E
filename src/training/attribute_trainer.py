@@ -120,7 +120,7 @@ class AttributeTrainer(BaseTrainer):
                 self.attribute_model.freeze_backbone()
 
     def _train_epoch(self) -> Dict[str, float]:
-        self.attribute_model.train()
+        self.model.train()
         self._update_backbone_state()
 
         epoch_loss = 0.0
@@ -147,7 +147,7 @@ class AttributeTrainer(BaseTrainer):
                 loss.backward()
 
             if self.gradient_clip_val > 0:
-                torch.nn.utils.clip_grad_norm_(self.attribute_model.parameters(), self.gradient_clip_val)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip_val)
 
             if self.use_amp:
                 self.scaler.step(self.optimizer)
@@ -169,7 +169,7 @@ class AttributeTrainer(BaseTrainer):
 
     def _compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         features = self._get_inputs(batch)
-        logits = self.attribute_model(features)
+        logits = self.model(features)
         targets = batch["attribute_labels"]
 
         if self.pos_weight is not None:
@@ -185,7 +185,7 @@ class AttributeTrainer(BaseTrainer):
         features = self._get_inputs(batch)
 
         with torch.no_grad():
-            logits = self.attribute_model(features)
+            logits = self.model(features)
 
         return {
             "attribute_logits": logits,

@@ -50,6 +50,7 @@ class RelationTrainer(BaseTrainer):
             **kwargs,
         )
 
+        self.relation_model = model
         self.label_smoothing = label_smoothing
         self.use_auto_class_weights = use_auto_class_weights
         self.class_weights = None
@@ -60,7 +61,7 @@ class RelationTrainer(BaseTrainer):
         if self.use_auto_class_weights:
             self.class_weights = compute_single_label_class_weights(
                 self.train_loader.dataset,
-                num_classes=self.model.num_relations,
+                num_classes=self.relation_model.num_relations,
                 label_key="relation_label",
                 power=0.5,
                 clip_min=0.25,
@@ -73,8 +74,8 @@ class RelationTrainer(BaseTrainer):
                 f"RelationTrainer auto class balancing enabled | weight mean={self.class_weights.mean().item():.3f}"
             )
 
-        if hasattr(self.model, "freeze_backbone") and (self.freeze_backbone or self.freeze_epochs > 0):
-            self.model.freeze_backbone()
+        if hasattr(self.relation_model, "freeze_backbone") and (self.freeze_backbone or self.freeze_epochs > 0):
+            self.relation_model.freeze_backbone()
             self._backbone_frozen = True
             self.logger.info(
                 f"Relation backbone frozen at start | freeze_backbone={self.freeze_backbone}, freeze_epochs={self.freeze_epochs}"
@@ -97,16 +98,16 @@ class RelationTrainer(BaseTrainer):
         return features
 
     def _update_backbone_state(self) -> None:
-        if not hasattr(self.model, "freeze_backbone"):
+        if not hasattr(self.relation_model, "freeze_backbone"):
             return
 
         if self._backbone_frozen:
             if self.freeze_epochs > 0 and self.current_epoch >= self.freeze_epochs:
-                self.model.unfreeze_backbone()
+                self.relation_model.unfreeze_backbone()
                 self._backbone_frozen = False
                 self.logger.info(f"Relation backbone unfrozen at epoch {self.current_epoch}")
             else:
-                self.model.freeze_backbone()
+                self.relation_model.freeze_backbone()
 
     def _train_epoch(self) -> Dict[str, float]:
         self.model.train()
@@ -184,7 +185,7 @@ class RelationTrainer(BaseTrainer):
     def _get_metrics(self, all_preds: List[torch.Tensor], all_targets: List[torch.Tensor]) -> Dict[str, float]:
         preds = torch.cat(all_preds)
         targets = torch.cat(all_targets)
-        return compute_classification_metrics(preds, targets, num_classes=self.model.num_relations)
+        return compute_classification_metrics(preds, targets, num_classes=self.relation_model.num_relations)
 
     def _log_batch(self, batch: Dict[str, torch.Tensor], loss: float, batch_idx: int):
         self.logger.log_metrics(

@@ -498,7 +498,7 @@ def run_object_pipeline(
     try:
         train_metrics = object_trainer.train()
         best_checkpoint = object_trainer.checkpoint_manager.get_best_checkpoint_path()
-        test_metrics = _evaluate_object_model(object_trainer.object_model, object_test_loader, runtime.device, object_train_ds.num_objects)
+        test_metrics = _evaluate_object_model(object_trainer.model, object_test_loader, runtime.device, object_train_ds.num_objects)
         print("Object pipeline completed.")
         print(f"Best object checkpoint: {best_checkpoint}")
         print("Object test metrics:")
@@ -599,7 +599,7 @@ def run_attribute_pipeline(
     try:
         train_metrics = attribute_trainer.train()
         best_checkpoint = attribute_trainer.checkpoint_manager.get_best_checkpoint_path()
-        test_metrics = _evaluate_attribute_model(attribute_trainer.attribute_model, attribute_test_loader, runtime.device, runtime.task_config)
+        test_metrics = _evaluate_attribute_model(attribute_trainer.model, attribute_test_loader, runtime.device, runtime.task_config)
         print("Attribute pipeline completed.")
         print(f"Best attribute checkpoint: {best_checkpoint}")
         print("Attribute test metrics:")

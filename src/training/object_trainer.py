@@ -115,7 +115,7 @@ class ObjectTrainer(BaseTrainer):
                 self.object_model.freeze_backbone()
 
     def _train_epoch(self) -> Dict[str, float]:
-        self.object_model.train()
+        self.model.train()
         self._update_backbone_state()
 
         epoch_loss = 0.0
@@ -142,7 +142,7 @@ class ObjectTrainer(BaseTrainer):
                 loss.backward()
 
             if self.gradient_clip_val > 0:
-                torch.nn.utils.clip_grad_norm_(self.object_model.parameters(), self.gradient_clip_val)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip_val)
 
             if self.use_amp:
                 self.scaler.step(self.optimizer)
@@ -164,7 +164,7 @@ class ObjectTrainer(BaseTrainer):
 
     def _compute_loss(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         features = self._get_inputs(batch)
-        logits = self.object_model(features)
+        logits = self.model(features)
         targets = batch["object_label"]
         return nn.functional.cross_entropy(logits, targets, weight=self.class_weights)
 
@@ -172,7 +172,7 @@ class ObjectTrainer(BaseTrainer):
         features = self._get_inputs(batch)
 
         with torch.no_grad():
-            logits = self.object_model(features)
+            logits = self.model(features)
 
         preds = logits.argmax(dim=1)
         targets = batch["object_label"]

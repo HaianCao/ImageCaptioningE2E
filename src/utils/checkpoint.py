@@ -8,6 +8,7 @@ import torch
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 import json
+import torch.nn as nn
 
 
 def _path_exists_safely(path: Path) -> bool:
@@ -24,6 +25,13 @@ def _path_stat_safely(path: Path):
         return Path(path).stat()
     except OSError:
         return None
+
+
+def _unwrap_parallel_model(model: torch.nn.Module) -> torch.nn.Module:
+    """Return the underlying module when the model is wrapped by DataParallel."""
+    if isinstance(model, nn.DataParallel):
+        return model.module
+    return model
 
 
 class CheckpointManager:
@@ -121,8 +129,9 @@ class CheckpointManager:
         checkpoint_path = self.checkpoint_dir / filename
 
         # Prepare checkpoint data
+        target_model = _unwrap_parallel_model(model)
         checkpoint = {
-            'model_state_dict': model.state_dict(),
+            'model_state_dict': target_model.state_dict(),
             'metadata': {
                 'epoch': epoch,
                 'loss': loss,
@@ -183,9 +192,17 @@ class CheckpointManager:
                 raise FileNotFoundError("No checkpoints found")
 
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        target_model = _unwrap_parallel_model(model)
+        state_dict = checkpoint['model_state_dict']
+
+        if isinstance(model, nn.DataParallel):
+            if any(key.startswith('module.') for key in state_dict.keys()):
+                state_dict = {key.removeprefix('module.'): value for key, value in state_dict.items()}
+        elif any(key.startswith('module.') for key in state_dict.keys()):
+            state_dict = {key.removeprefix('module.'): value for key, value in state_dict.items()}
 
         # Load model weights
-        model.load_state_dict(checkpoint['model_state_dict'])
+        target_model.load_state_dict(state_dict)
 
         # Load optimizer/scheduler
         if optimizer and 'optimizer_state_dict' in checkpoint:

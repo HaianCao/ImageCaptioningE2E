@@ -98,6 +98,17 @@ class BaseTrainer(ABC):
         # Mixed precision
         self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
 
+        if (
+            str(self.device).startswith("cuda")
+            and torch.cuda.is_available()
+            and torch.cuda.device_count() > 1
+            and not isinstance(model, nn.DataParallel)
+        ):
+            self.model = nn.DataParallel(model)
+            self.logger.info(f"Using DataParallel across {torch.cuda.device_count()} GPUs")
+        else:
+            self.model = model
+
         # Move model to device
         self.model.to(self.device)
 
