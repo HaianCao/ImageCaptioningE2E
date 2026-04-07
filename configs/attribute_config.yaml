@@ -39,6 +39,11 @@ labels:
   # Keep only the top-N most frequent attribute labels during preprocessing.
   max_attributes: 200
 
+# ── Sampling ──────────────────────────────────────────────
+sampling:
+  # Attribute pipeline samples from attribute labels instead of the combined task-1 label pool.
+  focus: "attribute"
+
 # ── Model Architecture ─────────────────────────────────────
 model:
   # Registered attribute model strategy.

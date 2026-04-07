@@ -42,6 +42,11 @@ labels:
   # Raw predicate vocabulary file path retained for compatibility with older preprocessing helpers.
   predicate_vocab_file: "data/processed/relation/predicate_vocab.json"
 
+# ── Sampling ──────────────────────────────────────────────
+sampling:
+  # Relation preprocessing samples from relation labels.
+  focus: "relation"
+
 # ── Spatial Features ───────────────────────────────────────
 spatial:
   # Append geometric features to the visual pair representation.

@@ -84,9 +84,13 @@ pipeline:
 sampling:
   # When true, sample image IDs first and then split the sampled subset.
   # When false, the pipeline uses the full split annotations.
-  strict_mode: false
+  strict_mode: true
+  # Sampling policy used when strict_mode is enabled.
+  # - random: random subset selection.
+  # - balanced: bias the subset toward rare labels.
+  strategy: "balanced"
   # Number of image IDs selected before splitting when strict_mode is enabled.
-  sample_size: 200
+  sample_size: 10000
   # Seed used for deterministic sampling and split assignment inside strict mode.
   seed: 42
   # Policy for downloading images referenced by the sampled or processed splits.
@@ -94,7 +98,7 @@ sampling:
   # - none: do not download images automatically.
   # - sample: download only the selected sample image IDs.
   # - all: download every referenced image ID.
-  image_download_mode: "all"
+  image_download_mode: "sample"
   # Optional per-split sample cap for debugging.
   # Use null to disable the cap and keep all samples.
   max_samples: null

@@ -9,7 +9,9 @@ Công dụng:
 """
 
 import json
-from collections import Counter
+import math
+import random
+from collections import Counter, defaultdict
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple, Optional
@@ -111,6 +113,67 @@ def _normalize_relation_name(text: str) -> str:
     return _apply_alias(text, "relations")
 
 
+def _select_balanced_image_ids(
+    image_to_labels: Dict[int, List[str]],
+    sample_size: int,
+    seed: int,
+    max_labels_per_image: int = 5,
+) -> List[int]:
+    """Select image ids with a bias toward images containing rare labels."""
+    unique_image_ids = list(image_to_labels.keys())
+    if sample_size >= len(unique_image_ids):
+        return unique_image_ids
+
+    label_frequency = Counter()
+    for labels in image_to_labels.values():
+        label_frequency.update(set(labels))
+
+    rng = random.Random(seed)
+    scored_images = []
+    for image_id, labels in image_to_labels.items():
+        unique_labels = list(dict.fromkeys(labels))
+        rarity_scores = sorted(
+            (
+                1.0 / label_frequency[label]
+                for label in unique_labels
+                if label in label_frequency and label_frequency[label] > 0
+            ),
+            reverse=True,
+        )
+        if not rarity_scores:
+            continue
+
+        top_scores = rarity_scores[:max_labels_per_image]
+        image_weight = sum(top_scores) / len(top_scores)
+        key = math.log(rng.random()) / max(image_weight, 1e-12)
+        scored_images.append((key, image_id))
+
+    scored_images.sort(reverse=True)
+    return [image_id for _, image_id in scored_images[:sample_size]]
+
+
+def _select_sample_image_ids(
+    image_to_labels: Dict[int, List[str]],
+    sample_size: Optional[int],
+    sample_strategy: str,
+    seed: int,
+) -> Optional[List[int]]:
+    if sample_size is None:
+        return None
+
+    unique_image_ids = list(image_to_labels.keys())
+    if sample_size <= 0:
+        return []
+    if sample_size >= len(unique_image_ids):
+        return unique_image_ids
+
+    strategy = str(sample_strategy).lower().strip()
+    if strategy == "balanced":
+        return _select_balanced_image_ids(image_to_labels, sample_size=sample_size, seed=seed)
+
+    return random.Random(seed).sample(unique_image_ids, sample_size)
+
+
 def _resolve_raw_file(raw_file_path: str) -> Path:
     """Resolve canonical VG raw filenames and known aliases."""
     raw_path = Path(raw_file_path)
@@ -203,6 +266,9 @@ def preprocess_task1(
     max_objects: int = 150,
     max_attributes: int = 100,
     sample_image_ids: Optional[List[int]] = None,
+    sample_size: Optional[int] = None,
+    sample_strategy: str = "random",
+    sample_focus: str = "combined",
     split_by_image_id: bool = False,
     split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 42,
@@ -233,28 +299,24 @@ def preprocess_task1(
         print(f"[Error] Không tìm thấy {raw_attributes_path}. Hãy tải dữ liệu trước.")
         return
 
-    sample_image_set = set(sample_image_ids) if sample_image_ids is not None else None
-    if sample_image_set is not None:
-        print(f"[Task 1] Giới hạn preprocessing trên {len(sample_image_set)} image_id đã chọn.")
-        
     # Map attributes by image_id
     attr_dict = {img['image_id']: img['attributes'] for img in attributes_data}
     
     # 2. Build Frequencies
     all_obj_names = []
     all_attr_names = []
+    object_image_to_labels = defaultdict(set)
+    attribute_image_to_labels = defaultdict(set)
     
     print("Đang đếm tần suất object & attributes...")
     valid_samples = []
     for img_obj in tqdm(objects_data, desc="Parsing"):
         img_id = img_obj["image_id"]
-        if sample_image_set is not None and img_id not in sample_image_set:
-            continue
         attrs_in_img = attr_dict.get(img_id, [])
         attr_lookup = {a["object_id"]: a for a in attrs_in_img}
         
         for obj in img_obj["objects"]:
-            name = str(obj.get("names", [""])[0]).lower().strip()
+            name = _normalize_object_name(str(obj.get("names", [""])[0]).lower().strip())
             if not name: continue
             
             all_obj_names.append(name)
@@ -266,6 +328,10 @@ def preprocess_task1(
                 
             obj_attrs = [str(a).lower().strip() for a in obj_attrs_raw if a]
             all_attr_names.extend(obj_attrs)
+
+            object_image_to_labels[img_id].add(f"object::{name}")
+            for attr_name in obj_attrs:
+                attribute_image_to_labels[img_id].add(f"attribute::{attr_name}")
             
             valid_samples.append({
                 "image_id": img_id,
@@ -274,6 +340,40 @@ def preprocess_task1(
                 "name": name,
                 "attributes": obj_attrs
             })
+
+    if sample_image_ids is None and split_by_image_id and sample_size is not None:
+        focus_key = str(sample_focus).lower().strip()
+        if focus_key == "object":
+            focus_labels = object_image_to_labels
+        elif focus_key == "attribute":
+            focus_labels = attribute_image_to_labels
+        elif focus_key == "combined":
+            focus_labels = defaultdict(set)
+            for image_id in set(object_image_to_labels) | set(attribute_image_to_labels):
+                focus_labels[image_id].update(object_image_to_labels.get(image_id, set()))
+                focus_labels[image_id].update(attribute_image_to_labels.get(image_id, set()))
+        else:
+            raise ValueError("sample_focus phải là 'combined', 'object', hoặc 'attribute'.")
+
+        sample_image_ids = _select_sample_image_ids(
+            image_to_labels=focus_labels,
+            sample_size=sample_size,
+            sample_strategy=sample_strategy,
+            seed=seed,
+        )
+
+    sample_image_set = set(sample_image_ids) if sample_image_ids is not None else None
+    if sample_image_set is not None:
+        print(f"[Task 1] Giới hạn preprocessing trên {len(sample_image_set)} image_id (focus={sample_focus}, strategy={sample_strategy}).")
+
+    selected_samples = valid_samples
+    if sample_image_set is not None:
+        selected_samples = [sample for sample in valid_samples if sample["image_id"] in sample_image_set]
+    else:
+        selected_samples = valid_samples
+
+    all_obj_names = [sample["name"] for sample in selected_samples]
+    all_attr_names = [attr for sample in selected_samples for attr in sample["attributes"]]
             
     # 3. Build Vocabs
     obj_vocab = build_vocab(all_obj_names, max_size=max_objects, normalizer=_normalize_object_name)
@@ -287,8 +387,8 @@ def preprocess_task1(
     # 4. Map to Index
     print("Đang mapping dữ liệu sang integer indices...")
     processed_samples = []
-    for s in valid_samples:
-        obj_idx = obj_vocab.get(_normalize_object_name(s["name"]), obj_vocab["<UNK>"])
+    for s in selected_samples:
+        obj_idx = obj_vocab.get(s["name"], obj_vocab["<UNK>"])
         if obj_idx == 0: continue # Bỏ qua Unknown Object để train tập trung
         
         attr_indices = []
@@ -348,6 +448,8 @@ def preprocess_task2(
     max_relations: int = 150,
     raw_image_data_path: Optional[str] = None,
     sample_image_ids: Optional[List[int]] = None,
+    sample_size: Optional[int] = None,
+    sample_strategy: str = "random",
     split_by_image_id: bool = False,
     split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 42,
@@ -378,10 +480,6 @@ def preprocess_task2(
         print(f"[Error] Không tìm thấy {raw_image_data_path}. Hãy tải dữ liệu trước.")
         return
 
-    sample_image_set = set(sample_image_ids) if sample_image_ids is not None else None
-    if sample_image_set is not None:
-        print(f"[Task 2] Giới hạn preprocessing trên {len(sample_image_set)} image_id đã chọn.")
-
     image_records = image_data if isinstance(image_data, list) else image_data.get("images", image_data.get("samples", []))
     image_info_map = {}
     for img in image_records:
@@ -394,18 +492,18 @@ def preprocess_task2(
         }
         
     all_predicates = []
+    image_to_labels = defaultdict(set)
     valid_samples = []
     
     for img_rel in tqdm(rel_data, desc="Parsing Relationships"):
         img_id = img_rel["image_id"]
-        if sample_image_set is not None and img_id not in sample_image_set:
-            continue
         
         for rel in img_rel["relationships"]:
             pred = str(rel.get("predicate", "")).lower().strip()
             if not pred: continue
             
             all_predicates.append(pred)
+            image_to_labels[img_id].add(f"relation::{_normalize_relation_name(pred)}")
             
             subj = rel["subject"]
             obj = rel["object"]
@@ -420,7 +518,25 @@ def preprocess_task2(
                 "predicate": pred,
                 "image_info": image_info_map.get(img_id, {}),
             })
-            
+
+    if sample_image_ids is None and split_by_image_id and sample_size is not None:
+        sample_image_ids = _select_sample_image_ids(
+            image_to_labels=image_to_labels,
+            sample_size=sample_size,
+            sample_strategy=sample_strategy,
+            seed=seed,
+        )
+
+    sample_image_set = set(sample_image_ids) if sample_image_ids is not None else None
+    if sample_image_set is not None:
+        print(f"[Task 2] Giới hạn preprocessing trên {len(sample_image_set)} image_id (strategy={sample_strategy}).")
+
+    selected_samples = valid_samples
+    if sample_image_set is not None:
+        selected_samples = [sample for sample in valid_samples if sample["image_id"] in sample_image_set]
+
+    all_predicates = [sample["predicate"] for sample in selected_samples]
+    
     rel_vocab = build_vocab(all_predicates, max_size=max_relations, normalizer=_normalize_relation_name)
     
     with open(out_path / "relation_vocab.json", "w") as f:
@@ -428,7 +544,7 @@ def preprocess_task2(
         
     print("Đang mapping dữ liệu sang integer indices...")
     processed_samples = []
-    for s in valid_samples:
+    for s in selected_samples:
         rel_idx = rel_vocab.get(_normalize_relation_name(s["predicate"]), rel_vocab["<UNK>"])
         if rel_idx == 0: continue # Bỏ qua relation lạ
         
@@ -486,6 +602,9 @@ def build_vocab_and_splits(
     max_attributes: int = 100,
     max_relations: int = 150,
     sample_image_ids: Optional[List[int]] = None,
+    sample_size: Optional[int] = None,
+    sample_strategy: str = "random",
+    sample_focus: str = "combined",
     split_by_image_id: bool = False,
     split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 42,
@@ -504,6 +623,9 @@ def build_vocab_and_splits(
             max_objects=max_objects,
             max_attributes=max_attributes,
             sample_image_ids=sample_image_ids,
+            sample_size=sample_size,
+            sample_strategy=sample_strategy,
+            sample_focus=sample_focus,
             split_by_image_id=split_by_image_id,
             split_ratios=split_ratios,
             seed=seed,
@@ -515,6 +637,8 @@ def build_vocab_and_splits(
             max_relations=max_relations,
             raw_image_data_path=str(r_dir / "image_data.json"),
             sample_image_ids=sample_image_ids,
+            sample_size=sample_size,
+            sample_strategy=sample_strategy,
             split_by_image_id=split_by_image_id,
             split_ratios=split_ratios,
             seed=seed,
@@ -530,6 +654,9 @@ def preprocess_object_attribute(
     max_objects: int = 150,
     max_attributes: int = 100,
     sample_image_ids: Optional[List[int]] = None,
+    sample_size: Optional[int] = None,
+    sample_strategy: str = "random",
+    sample_focus: str = "combined",
     split_by_image_id: bool = False,
     split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 42,
@@ -542,6 +669,9 @@ def preprocess_object_attribute(
         max_objects=max_objects,
         max_attributes=max_attributes,
         sample_image_ids=sample_image_ids,
+        sample_size=sample_size,
+        sample_strategy=sample_strategy,
+        sample_focus=sample_focus,
         split_by_image_id=split_by_image_id,
         split_ratios=split_ratios,
         seed=seed,
@@ -554,6 +684,8 @@ def preprocess_relation(
     max_relations: int = 150,
     raw_image_data_path: Optional[str] = None,
     sample_image_ids: Optional[List[int]] = None,
+    sample_size: Optional[int] = None,
+    sample_strategy: str = "random",
     split_by_image_id: bool = False,
     split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 42,
@@ -565,6 +697,8 @@ def preprocess_relation(
         max_relations=max_relations,
         raw_image_data_path=raw_image_data_path,
         sample_image_ids=sample_image_ids,
+        sample_size=sample_size,
+        sample_strategy=sample_strategy,
         split_by_image_id=split_by_image_id,
         split_ratios=split_ratios,
         seed=seed,
@@ -577,6 +711,9 @@ def build_object_attribute_vocab_and_splits(
     max_objects: int = 150,
     max_attributes: int = 100,
     sample_image_ids: Optional[List[int]] = None,
+    sample_size: Optional[int] = None,
+    sample_strategy: str = "random",
+    sample_focus: str = "combined",
     split_by_image_id: bool = False,
     split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 42,
@@ -590,6 +727,9 @@ def build_object_attribute_vocab_and_splits(
         max_objects=max_objects,
         max_attributes=max_attributes,
         sample_image_ids=sample_image_ids,
+        sample_size=sample_size,
+        sample_strategy=sample_strategy,
+        sample_focus=sample_focus,
         split_by_image_id=split_by_image_id,
         split_ratios=split_ratios,
         seed=seed,
@@ -601,6 +741,8 @@ def build_relation_vocab_and_splits(
     processed_dir: str = "data/processed/relation",
     max_relations: int = 150,
     sample_image_ids: Optional[List[int]] = None,
+    sample_size: Optional[int] = None,
+    sample_strategy: str = "random",
     split_by_image_id: bool = False,
     split_ratios: Tuple[float, float, float] = (0.7, 0.15, 0.15),
     seed: int = 42,
@@ -613,6 +755,8 @@ def build_relation_vocab_and_splits(
         max_relations=max_relations,
         raw_image_data_path=str(r_dir / "image_data.json"),
         sample_image_ids=sample_image_ids,
+        sample_size=sample_size,
+        sample_strategy=sample_strategy,
         split_by_image_id=split_by_image_id,
         split_ratios=split_ratios,
         seed=seed,

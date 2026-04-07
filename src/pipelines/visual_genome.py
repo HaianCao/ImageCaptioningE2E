@@ -60,6 +60,8 @@ class PipelineRuntime:
     strict_sample_mode: bool
     sample_size: int
     sample_seed: int
+    sample_strategy: str
+    sample_focus: str
     image_download_mode: str
     feature_mean: List[float]
     feature_std: List[float]
@@ -96,8 +98,20 @@ def _build_runtime(
     processed_dir = project_root / Path(task_config.dataset.processed_dir)
     checkpoint_dir = project_root / Path(base_config.paths.checkpoint_dir)
 
-    strict_sample_mode = bool(base_config.sampling.strict_mode)
-    image_download_mode = "none" if strict_sample_mode else str(base_config.sampling.image_download_mode)
+    base_sampling = getattr(base_config, "sampling", None)
+    task_sampling = getattr(task_config, "sampling", None)
+
+    def _sampling_value(name: str, default: Any) -> Any:
+        if task_sampling is not None and hasattr(task_sampling, name):
+            return getattr(task_sampling, name)
+        if base_sampling is not None and hasattr(base_sampling, name):
+            return getattr(base_sampling, name)
+        return default
+
+    strict_sample_mode = bool(_sampling_value("strict_mode", base_config.sampling.strict_mode))
+    sample_strategy = str(_sampling_value("strategy", "random"))
+    sample_focus = str(_sampling_value("focus", "combined"))
+    image_download_mode = "none" if strict_sample_mode else str(_sampling_value("image_download_mode", base_config.sampling.image_download_mode))
 
     return PipelineRuntime(
         project_root=project_root,
@@ -110,8 +124,10 @@ def _build_runtime(
         device=device,
         download_data=bool(base_config.pipeline.download_data),
         strict_sample_mode=strict_sample_mode,
-        sample_size=int(base_config.sampling.sample_size),
-        sample_seed=int(base_config.sampling.seed),
+        sample_size=int(_sampling_value("sample_size", base_config.sampling.sample_size)),
+        sample_seed=int(_sampling_value("seed", base_config.sampling.seed)),
+        sample_strategy=sample_strategy,
+        sample_focus=sample_focus,
         image_download_mode=image_download_mode,
         feature_mean=[float(x) for x in base_config.image.mean],
         feature_std=[float(x) for x in base_config.image.std],
@@ -131,7 +147,9 @@ def _print_runtime_summary(runtime: PipelineRuntime, task_name: str, show_full_c
     print(f"Using device: {runtime.device}")
     print(f"Processed root: {runtime.processed_dir}")
     print(f"Strict sample mode: {runtime.strict_sample_mode}")
-    print(f"Sample size: {runtime.sample_size} | split ratios: {runtime.split_ratios} | seed: {runtime.sample_seed}")
+    print(
+        f"Sample size: {runtime.sample_size} | sample strategy: {runtime.sample_strategy} | sample focus: {runtime.sample_focus} | split ratios: {runtime.split_ratios} | seed: {runtime.sample_seed}"
+    )
     print(f"Download data: {runtime.download_data} | image mode: {runtime.image_download_mode}")
     strategy_name = str(getattr(runtime.task_config.model, "strategy", "baseline_cnn"))
     backbone_name = getattr(runtime.task_config.backbone, "name", None)
@@ -199,18 +217,6 @@ def _prepare_raw_data(runtime: PipelineRuntime, task_name: str) -> List[Dict[str
             raise ValueError("IMAGE_DOWNLOAD_MODE phải là 'none', 'sample', hoặc 'all'.")
 
     return image_data
-
-
-def _sample_image_ids(image_data: List[Dict[str, Any]], runtime: PipelineRuntime) -> Optional[List[int]]:
-    if not runtime.strict_sample_mode:
-        print("Bỏ qua strict sample; sẽ dùng toàn bộ dữ liệu theo split mặc định.")
-        return None
-
-    all_image_ids = [img["image_id"] for img in image_data]
-    sample_count = min(runtime.sample_size, len(all_image_ids))
-    sample_image_ids = random.Random(runtime.sample_seed).sample(all_image_ids, sample_count)
-    print(f"Đã chọn trước {len(sample_image_ids)} image_id cho sample strict.")
-    return sample_image_ids
 
 
 def _download_missing_images_for_splits(runtime: PipelineRuntime, task_name: str, split_names: Sequence[str]) -> None:
@@ -339,8 +345,8 @@ def _evaluate_relation_model(model: RelationClassifier, loader: DataLoader, devi
     )
 
 
-def _prepare_object_attribute_split_files(runtime: PipelineRuntime, image_data: List[Dict[str, Any]]) -> Optional[List[int]]:
-    sample_image_ids = _sample_image_ids(image_data, runtime)
+def _prepare_object_attribute_split_files(runtime: PipelineRuntime) -> Optional[List[int]]:
+    sample_image_ids = None
 
     build_object_attribute_vocab_and_splits(
         raw_dir=str(runtime.raw_dir),
@@ -348,6 +354,9 @@ def _prepare_object_attribute_split_files(runtime: PipelineRuntime, image_data: 
         max_objects=int(runtime.task_config.labels.max_objects),
         max_attributes=int(runtime.task_config.labels.max_attributes),
         sample_image_ids=sample_image_ids,
+        sample_size=int(runtime.sample_size),
+        sample_strategy=runtime.sample_strategy,
+        sample_focus=runtime.sample_focus,
         split_by_image_id=runtime.strict_sample_mode,
         split_ratios=runtime.split_ratios,
         seed=runtime.sample_seed,
@@ -367,14 +376,16 @@ def _prepare_object_attribute_split_files(runtime: PipelineRuntime, image_data: 
     return sample_image_ids
 
 
-def _prepare_relation_split_files(runtime: PipelineRuntime, image_data: List[Dict[str, Any]]) -> Optional[List[int]]:
-    sample_image_ids = _sample_image_ids(image_data, runtime)
+def _prepare_relation_split_files(runtime: PipelineRuntime) -> Optional[List[int]]:
+    sample_image_ids = None
 
     build_relation_vocab_and_splits(
         raw_dir=str(runtime.raw_dir),
         processed_dir=str(runtime.processed_dir),
         max_relations=int(runtime.task_config.labels.max_relations),
         sample_image_ids=sample_image_ids,
+        sample_size=int(runtime.sample_size),
+        sample_strategy=runtime.sample_strategy,
         split_by_image_id=runtime.strict_sample_mode,
         split_ratios=runtime.split_ratios,
         seed=runtime.sample_seed,
@@ -404,8 +415,8 @@ def run_object_pipeline(
     runtime = _build_runtime(base_config_path, task_config_path, project_root)
     _print_runtime_summary(runtime, "object", show_full_config)
 
-    image_data = _prepare_raw_data(runtime, "Task 1")
-    _prepare_object_attribute_split_files(runtime, image_data)
+    _prepare_raw_data(runtime, "Task 1")
+    _prepare_object_attribute_split_files(runtime)
 
     preprocessing_cfg = _get_preprocessing_config(runtime.task_config)
     preprocessing_color_jitter_cfg = getattr(preprocessing_cfg, "color_jitter", None)
@@ -514,8 +525,8 @@ def run_attribute_pipeline(
     runtime = _build_runtime(base_config_path, task_config_path, project_root)
     _print_runtime_summary(runtime, "attribute", show_full_config)
 
-    image_data = _prepare_raw_data(runtime, "Task 1")
-    _prepare_object_attribute_split_files(runtime, image_data)
+    _prepare_raw_data(runtime, "Task 1")
+    _prepare_object_attribute_split_files(runtime)
 
     preprocessing_cfg = _get_preprocessing_config(runtime.task_config)
     preprocessing_color_jitter_cfg = getattr(preprocessing_cfg, "color_jitter", None)
@@ -615,8 +626,8 @@ def run_relation_pipeline(
     runtime = _build_runtime(base_config_path, task_config_path, project_root)
     _print_runtime_summary(runtime, "relation", show_full_config)
 
-    image_data = _prepare_raw_data(runtime, "Task 2")
-    _prepare_relation_split_files(runtime, image_data)
+    _prepare_raw_data(runtime, "Task 2")
+    _prepare_relation_split_files(runtime)
 
     preprocessing_cfg = _get_preprocessing_config(runtime.task_config)
     preprocessing_color_jitter_cfg = getattr(preprocessing_cfg, "color_jitter", None)

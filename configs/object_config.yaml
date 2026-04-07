@@ -39,6 +39,11 @@ labels:
   # Shared preprocessing cap for the attribute vocabulary used by task 1.
   max_attributes: 200
 
+# ── Sampling ──────────────────────────────────────────────
+sampling:
+  # Object pipeline samples from object labels instead of the combined task-1 label pool.
+  focus: "object"
+
 # ── Model Architecture ─────────────────────────────────────
 model:
   # Registered object model strategy.
