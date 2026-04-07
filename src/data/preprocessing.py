@@ -10,8 +10,9 @@ Công dụng:
 
 import json
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Callable, Dict, List, Tuple, Optional
 
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -23,6 +24,91 @@ RAW_FILE_ALIASES = {
     "attributes.json": [],
     "image_data.json": [],
 }
+
+ALIAS_FILE_PATH = Path(__file__).resolve().parents[2] / "data" / "aliases" / "visual_genome_aliases.txt"
+
+
+def _normalize_alias_phrase(text: str) -> str:
+    """Normalize alias keys without guessing morphology."""
+    cleaned = str(text).lower().strip().replace("-", " ")
+    if not cleaned:
+        return cleaned
+    return " ".join(cleaned.split())
+
+
+@lru_cache(maxsize=1)
+def _load_alias_maps() -> Dict[str, Dict[str, str]]:
+    """Load manually reviewed alias maps for objects and relations."""
+    if not ALIAS_FILE_PATH.exists():
+        raise FileNotFoundError(f"Không tìm thấy file alias: {ALIAS_FILE_PATH}")
+
+    alias_maps: Dict[str, Dict[str, str]] = {}
+    current_section = None
+
+    with open(ALIAS_FILE_PATH, "r", encoding="utf-8") as f:
+        for line_number, raw_line in enumerate(f, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            section_key = line.lower()
+            if section_key in {"[objects]", "objects"}:
+                current_section = "objects"
+                alias_maps.setdefault(current_section, {})
+                continue
+            if section_key in {"[relations]", "relations"}:
+                current_section = "relations"
+                alias_maps.setdefault(current_section, {})
+                continue
+
+            if current_section is None:
+                raise ValueError(
+                    f"Alias file phải khai báo [objects] hoặc [relations] trước dữ liệu, lỗi ở dòng {line_number}."
+                )
+
+            parts = [_normalize_alias_phrase(part) for part in line.split(",")]
+            parts = [part for part in parts if part]
+            if len(parts) < 2:
+                raise ValueError(
+                    f"Alias line phải có ít nhất 1 canonical và 1 alias, lỗi ở dòng {line_number}: {raw_line.rstrip()}"
+                )
+
+            canonical_value = parts[0]
+            section_map = alias_maps.setdefault(current_section, {})
+            for alias_value in parts[1:]:
+                existing = section_map.get(alias_value)
+                if existing is not None and existing != canonical_value:
+                    raise ValueError(
+                        f"Alias '{alias_value}' bị map hai lần: '{existing}' và '{canonical_value}' (dòng {line_number})."
+                    )
+                section_map[alias_value] = canonical_value
+
+    if "objects" not in alias_maps or "relations" not in alias_maps:
+        raise ValueError("Alias file phải chứa cả [objects] và [relations].")
+
+    return alias_maps
+
+
+def _apply_alias(text: str, section: str) -> str:
+    """Apply a manual alias map until it reaches a stable canonical form."""
+    alias_maps = _load_alias_maps()
+    if section not in alias_maps:
+        raise KeyError(f"Unknown alias section: {section}")
+
+    current = _normalize_alias_phrase(text)
+    seen = set()
+    while current in alias_maps[section] and current not in seen:
+        seen.add(current)
+        current = alias_maps[section][current]
+    return current
+
+
+def _normalize_object_name(text: str) -> str:
+    return _apply_alias(text, "objects")
+
+
+def _normalize_relation_name(text: str) -> str:
+    return _apply_alias(text, "relations")
 
 
 def _resolve_raw_file(raw_file_path: str) -> Path:
@@ -88,12 +174,18 @@ def _split_image_ids(
     return list(train_ids), list(val_ids), list(test_ids)
 
 
-def build_vocab(items: List[str], max_size: int = 1000, unk_token: str = "<UNK>") -> Dict[str, int]:
+def build_vocab(
+    items: List[str],
+    max_size: int = 1000,
+    unk_token: str = "<UNK>",
+    normalizer: Optional[Callable[[str], str]] = None,
+) -> Dict[str, int]:
     """
     Xây dựng vocabulary (Từ điển class -> index) từ danh sách các mục.
     Lọc bỏ các mục hiếm xuất hiện (chỉ giữ lại max_size mục phổ biến nhất).
     """
-    counter = Counter(items)
+    normalized_items = [normalizer(item) if normalizer is not None else item for item in items]
+    counter = Counter(normalized_items)
     # Lấy top-k mục phổ biến nhất
     most_common = counter.most_common(max_size)
     
@@ -184,7 +276,7 @@ def preprocess_task1(
             })
             
     # 3. Build Vocabs
-    obj_vocab = build_vocab(all_obj_names, max_size=max_objects)
+    obj_vocab = build_vocab(all_obj_names, max_size=max_objects, normalizer=_normalize_object_name)
     attr_vocab = build_vocab(all_attr_names, max_size=max_attributes)
     
     with open(out_path / "object_vocab.json", "w") as f:
@@ -196,7 +288,7 @@ def preprocess_task1(
     print("Đang mapping dữ liệu sang integer indices...")
     processed_samples = []
     for s in valid_samples:
-        obj_idx = obj_vocab.get(s["name"], obj_vocab["<UNK>"])
+        obj_idx = obj_vocab.get(_normalize_object_name(s["name"]), obj_vocab["<UNK>"])
         if obj_idx == 0: continue # Bỏ qua Unknown Object để train tập trung
         
         attr_indices = []
@@ -329,7 +421,7 @@ def preprocess_task2(
                 "image_info": image_info_map.get(img_id, {}),
             })
             
-    rel_vocab = build_vocab(all_predicates, max_size=max_relations)
+    rel_vocab = build_vocab(all_predicates, max_size=max_relations, normalizer=_normalize_relation_name)
     
     with open(out_path / "relation_vocab.json", "w") as f:
         json.dump(rel_vocab, f, indent=2)
@@ -337,7 +429,7 @@ def preprocess_task2(
     print("Đang mapping dữ liệu sang integer indices...")
     processed_samples = []
     for s in valid_samples:
-        rel_idx = rel_vocab.get(s["predicate"], rel_vocab["<UNK>"])
+        rel_idx = rel_vocab.get(_normalize_relation_name(s["predicate"]), rel_vocab["<UNK>"])
         if rel_idx == 0: continue # Bỏ qua relation lạ
         
         processed_samples.append({
@@ -345,8 +437,8 @@ def preprocess_task2(
             "relationship_id": s["relationship_id"],
             "subject_bbox": s["subject_bbox"],
             "object_bbox": s["object_bbox"],
-            "subject_name": s["subject_name"],
-            "object_name": s["object_name"],
+            "subject_name": _normalize_object_name(s["subject_name"]),
+            "object_name": _normalize_object_name(s["object_name"]),
             "relation_label": rel_idx,
             "image_info": s.get("image_info", {}),
         })

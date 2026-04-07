@@ -57,11 +57,11 @@ image:
 # ── Data Split ─────────────────────────────────────────────
 split:
   # Proportion of data assigned to the training split.
-  train: 0.70
+  train: 0.80
   # Proportion of data assigned to the validation split.
-  val: 0.15
+  val: 0.10
   # Proportion of data assigned to the test split.
-  test: 0.15
+  test: 0.10
 
 # ── Runtime / Notebook Controls ────────────────────────────
 pipeline:
@@ -86,7 +86,7 @@ sampling:
   # When false, the pipeline uses the full split annotations.
   strict_mode: false
   # Number of image IDs selected before splitting when strict_mode is enabled.
-  sample_size: 200
+  sample_size: 10
   # Seed used for deterministic sampling and split assignment inside strict mode.
   seed: 42
   # Policy for downloading images referenced by the sampled or processed splits.

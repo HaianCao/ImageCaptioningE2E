@@ -1,0 +1,117 @@
+# Visual Genome alias groups
+# Format:
+# [objects]
+# canonical,alias1,alias2,...
+# [relations]
+# canonical,alias1,alias2,...
+# Blank lines and lines starting with # are ignored.
+
+[objects]
+arm,arms
+beach,beaches
+bear,bears
+bike,bikes,bikes are
+bird,birds
+boat,boats
+bottle,bottles
+box,boxes
+branch,branches
+building,buildings
+bush,bushes
+car,cars
+cat,cats
+chair,chairs
+child,children
+clock,clocks
+cloud,clouds
+coat,coats
+cow,cows
+cup,cups
+dog,dogs
+door,doors
+dress,dresses
+ear,ears
+elephant,elephants
+eye,eyes
+foot,feet
+fence,fences
+flag,flags
+flower,flowers
+frisbee,frisbees
+glider,gliders
+glass,glasses
+glove,gloves
+hand,hands
+headlight,headlights
+horse,horses
+house,houses
+jacket,jackets
+kite,kites
+lady,ladies
+ladder,ladders
+lamp,lamps
+leg,legs
+leaf,leaves
+letter,letters
+light,lights
+line,lines
+man,men
+monitor,monitors
+mountain,mountains
+paper,papers
+person,people
+phone,phones
+plane,planes
+plate,plates
+player,players
+pole,poles
+road,roads
+rock,rocks
+ring,rings
+roof,roofs
+shirt,shirts
+shoe,shoes
+shadow,shadows
+shelf,shelves
+sign,signs
+sock,socks
+sleeve,sleeves
+snowflake,snowflakes
+stair,stairs
+stone,stones
+stripe,stripes
+swab,swabs
+swan,swans
+teaspoon,teaspoons
+table,tables
+tie,ties
+track,tracks
+train,trains
+tree,trees
+truck,trucks
+umbrella,umbrellas
+vehicle,vehicles
+van,vans
+wheel,wheels
+window,windows
+wing,wings
+woman,women
+zebra,zebras
+crossbar,crossbars
+
+[relations]
+near,next to,around,by,beside,on side of
+above,on top of,on top of a
+in front of,on front of
+on,are on,on a
+hanging from,hanging on
+in,in a,inside,inside of
+under,below,beneath
+has,has a,has an,have
+holding,holds
+lying on,laying on
+of,of a
+at,at a
+sitting at,sitting at a
+with,with a,with an
+wearing,wears,wearing a
