@@ -141,7 +141,7 @@ def _build_runtime(
     )
 
 
-def _print_runtime_summary(runtime: PipelineRuntime, task_name: str, show_full_config: bool) -> None:
+def _print_runtime_summary(runtime: PipelineRuntime, task_name: str) -> None:
     print(f"========== PIPELINE: {task_name.upper()} ==========")
     print(f"Project root: {runtime.project_root}")
     print(f"Using device: {runtime.device}")
@@ -163,8 +163,10 @@ def _print_runtime_summary(runtime: PipelineRuntime, task_name: str, show_full_c
     default_preprocessing_strategy = "baseline_task2" if task_name == "relation" else "baseline_task1"
     preprocessing_strategy = str(getattr(preprocessing_config, "strategy", default_preprocessing_strategy))
     print(f"Preprocessing strategy: {preprocessing_strategy}")
+
+
+def _print_runtime_config(runtime: PipelineRuntime, show_full_config: bool) -> None:
     if show_full_config:
-        print_config(runtime.base_config)
         print_config(runtime.task_config)
 
 
@@ -413,7 +415,8 @@ def run_object_pipeline(
 ) -> PipelineResult:
     """Run the object classification pipeline end to end."""
     runtime = _build_runtime(base_config_path, task_config_path, project_root)
-    _print_runtime_summary(runtime, "object", show_full_config)
+    _print_runtime_summary(runtime, "object")
+    _print_runtime_config(runtime, show_full_config)
 
     _prepare_raw_data(runtime, "Task 1")
     _prepare_object_attribute_split_files(runtime)
@@ -523,7 +526,8 @@ def run_attribute_pipeline(
 ) -> PipelineResult:
     """Run the attribute classification pipeline end to end."""
     runtime = _build_runtime(base_config_path, task_config_path, project_root)
-    _print_runtime_summary(runtime, "attribute", show_full_config)
+    _print_runtime_summary(runtime, "attribute")
+    _print_runtime_config(runtime, show_full_config)
 
     _prepare_raw_data(runtime, "Task 1")
     _prepare_object_attribute_split_files(runtime)
@@ -624,7 +628,8 @@ def run_relation_pipeline(
 ) -> PipelineResult:
     """Run the relation classification pipeline end to end."""
     runtime = _build_runtime(base_config_path, task_config_path, project_root)
-    _print_runtime_summary(runtime, "relation", show_full_config)
+    _print_runtime_summary(runtime, "relation")
+    _print_runtime_config(runtime, show_full_config)
 
     _prepare_raw_data(runtime, "Task 2")
     _prepare_relation_split_files(runtime)

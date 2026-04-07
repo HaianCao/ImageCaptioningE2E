@@ -82,7 +82,7 @@ training:
   # Pin host memory only when CUDA is available.
   pin_memory: true
   # Maximum number of training epochs.
-  max_epochs: 40
+  max_epochs: 10
   # Stop training after this many validation epochs without improvement.
   early_stopping_patience: 5
   # Maximum gradient norm used for clipping.
