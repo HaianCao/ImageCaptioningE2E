@@ -40,11 +40,19 @@ JSON_FILE_ALIASES = {
 }
 
 
+def _path_exists_safely(path: Path) -> bool:
+    """Return False when the filesystem raises an OSError during existence checks."""
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 def _find_existing_json(raw_path: Path, filename: str) -> Optional[Path]:
     """Find a canonical JSON file or one of its known aliases."""
     for candidate_name in [filename, *JSON_FILE_ALIASES.get(filename, [])]:
         candidate_path = raw_path / candidate_name
-        if candidate_path.exists():
+        if _path_exists_safely(candidate_path):
             return candidate_path
     return None
 
@@ -216,7 +224,7 @@ def download_vg_images(
         # Ở VG_100K, một số ảnh thuộc part 2: VG_100K_2. Để đơn giản ta giả sử dùng URL cơ bản.
         # Ở kịch bản thực tế, Image URL có sẵn trong dữ liệu image_data.json
         local_path = image_dir_path / f"{img_id}.jpg"
-        if local_path.exists():
+        if _path_exists_safely(local_path):
             results[img_id] = str(local_path)
         else:
             to_download.append(img_id)
@@ -287,7 +295,10 @@ def verify_download(
         status[fname] = fpath is not None
         icon = "✅" if fpath else "❌"
         if fpath:
-            size = f"({fpath.stat().st_size / 1e6:.1f} MB)"
+            try:
+                size = f"({fpath.stat().st_size / 1e6:.1f} MB)"
+            except OSError:
+                size = "(Không đọc được kích thước)"
             display_name = fpath.name if fpath.name != fname else fname
         else:
             size = "(Thiếu file)"

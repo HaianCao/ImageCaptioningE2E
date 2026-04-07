@@ -15,7 +15,7 @@ backbone:
   pretrained: true
   # Freeze the selected backbone during training.
   # Set true to train only the relation head.
-  freeze_backbone: false
+  freeze_backbone: true
 
 # ── Dataset ────────────────────────────────────────────────
 dataset:

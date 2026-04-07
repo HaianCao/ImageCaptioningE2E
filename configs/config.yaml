@@ -86,7 +86,7 @@ sampling:
   # When false, the pipeline uses the full split annotations.
   strict_mode: false
   # Number of image IDs selected before splitting when strict_mode is enabled.
-  sample_size: 10
+  sample_size: 200
   # Seed used for deterministic sampling and split assignment inside strict mode.
   seed: 42
   # Policy for downloading images referenced by the sampled or processed splits.
