@@ -10,6 +10,22 @@ from typing import Dict, Any, Optional, Union
 import json
 
 
+def _path_exists_safely(path: Path) -> bool:
+    """Return False when a filesystem check raises OSError on mounted storage."""
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
+def _path_stat_safely(path: Path):
+    """Return path stat information or None when the filesystem is unavailable."""
+    try:
+        return Path(path).stat()
+    except OSError:
+        return None
+
+
 class CheckpointManager:
     """
     Manages model checkpoints with automatic saving and loading.
@@ -42,7 +58,7 @@ class CheckpointManager:
     def _load_checkpoint_list(self):
         """Load list of existing checkpoints."""
         self.checkpoints = []
-        if self.checkpoint_dir.exists():
+        if _path_exists_safely(self.checkpoint_dir):
             for ckpt_file in self.checkpoint_dir.glob("*.pth"):
                 try:
                     # Load metadata from checkpoint
@@ -55,7 +71,7 @@ class CheckpointManager:
                         'epoch': metadata.get('epoch', 0),
                         'loss': metadata.get('loss', float('inf')),
                         'metric': metric_value,
-                        'timestamp': ckpt_file.stat().st_mtime
+                        'timestamp': _path_stat_safely(ckpt_file).st_mtime if _path_stat_safely(ckpt_file) is not None else 0
                     })
                 except Exception as e:
                     print(f"Warning: Could not load checkpoint {ckpt_file}: {e}")
@@ -203,7 +219,10 @@ class CheckpointManager:
         # Remove old ones
         for ckpt in self.checkpoints:
             if str(ckpt['path']) not in keep_files:
-                ckpt['path'].unlink()
+                try:
+                    ckpt['path'].unlink()
+                except OSError:
+                    pass
 
     def list_checkpoints(self) -> list:
         """List all available checkpoints."""

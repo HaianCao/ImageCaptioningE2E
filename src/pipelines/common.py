@@ -13,12 +13,28 @@ from typing import Iterable, List, Optional, Sequence
 import torch
 
 
+def _path_exists_safely(path: Path) -> bool:
+    """Return False when a filesystem check raises OSError on mounted storage."""
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
+def _path_stat_safely(path: Path):
+    """Return path stat information or None when the filesystem is unavailable."""
+    try:
+        return Path(path).stat()
+    except OSError:
+        return None
+
+
 def resolve_project_root(start_path: Optional[Path] = None) -> Path:
     """Find the repository root that contains both configs/ and src/."""
     current = (start_path or Path.cwd()).resolve()
 
     while current != current.parent:
-        if (current / "configs").exists() and (current / "src").exists():
+        if _path_exists_safely(current / "configs") and _path_exists_safely(current / "src"):
             return current
         current = current.parent
 
@@ -80,7 +96,7 @@ def normalize_input_mode(mode: str) -> str:
 
 def require_files(paths: Sequence[Path], label: str) -> None:
     """Raise if any file in paths does not exist."""
-    missing = [str(path) for path in paths if not Path(path).exists()]
+    missing = [str(path) for path in paths if not _path_exists_safely(Path(path))]
     if missing:
         raise FileNotFoundError(f"Thiếu {label}: {missing}")
 
@@ -88,7 +104,8 @@ def require_files(paths: Sequence[Path], label: str) -> None:
 def ensure_nonempty_cache(cache_path: Path) -> bool:
     """Return True when a cache file exists and contains at least one entry."""
     cache_path = Path(cache_path)
-    if not cache_path.exists() or cache_path.stat().st_size == 0:
+    cache_stat = _path_stat_safely(cache_path)
+    if cache_stat is None or cache_stat.st_size == 0:
         return False
 
     try:
@@ -104,11 +121,14 @@ def collect_split_image_ids(processed_root: Path, split_names: Sequence[str]) ->
 
     for split_name in split_names:
         annotation_file = Path(processed_root) / split_name / "annotations.json"
-        if not annotation_file.exists():
+        if not _path_exists_safely(annotation_file):
             raise FileNotFoundError(f"Thiếu annotation: {annotation_file}")
 
-        with open(annotation_file, "r", encoding="utf-8") as f:
-            raw = json.load(f)
+        try:
+            with open(annotation_file, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except OSError as exc:
+            raise FileNotFoundError(f"Không đọc được annotation: {annotation_file}") from exc
 
         samples = raw if isinstance(raw, list) else raw.get("samples", [])
         image_ids.update(sample["image_id"] for sample in samples)
@@ -119,4 +139,9 @@ def collect_split_image_ids(processed_root: Path, split_names: Sequence[str]) ->
 def missing_local_image_ids(image_dir: Path, image_ids: Iterable[int]) -> List[int]:
     """Return the ids for images that are not present locally."""
     image_dir = Path(image_dir)
-    return [image_id for image_id in image_ids if not (image_dir / f"{image_id}.jpg").exists()]
+    missing_ids = []
+    for image_id in image_ids:
+        image_path = image_dir / f"{image_id}.jpg"
+        if not _path_exists_safely(image_path):
+            missing_ids.append(image_id)
+    return missing_ids

@@ -63,8 +63,11 @@ def _normalize_json_file(source_path: Path, canonical_name: str) -> Path:
     if source_path.name == canonical_name:
         return source_path
 
-    if canonical_path.exists():
-        canonical_path.unlink()
+    if _path_exists_safely(canonical_path):
+        try:
+            canonical_path.unlink()
+        except OSError:
+            pass
 
     source_path.rename(canonical_path)
     return canonical_path
@@ -169,9 +172,12 @@ def download_and_extract_metadata(
                 results[dtype] = str(normalized_path)
             
             # Dọn dẹp
-            if not keep_zip and zip_path.exists():
-                os.remove(zip_path)
-                print(f"[Cleanup] Đã xóa {zip_name}")
+            if not keep_zip and _path_exists_safely(zip_path):
+                try:
+                    os.remove(zip_path)
+                    print(f"[Cleanup] Đã xóa {zip_name}")
+                except OSError:
+                    print(f"[Warning] Không xóa được {zip_name} do lỗi filesystem.")
                 
         except Exception as e:
             print(f"[Error] Không tải được {dtype}: {str(e)}")

@@ -20,6 +20,14 @@ from .roi_extractor import extract_roi, extract_union_roi
 from ..utils.memory import cleanup_cuda_memory
 
 
+def _path_exists_safely(path: Path) -> bool:
+    """Return False when a filesystem check raises OSError on mounted storage."""
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
 def _load_image_cached(
     image_dir: Union[str, Path],
     image_id: int,
@@ -31,11 +39,14 @@ def _load_image_cached(
         return cached_image
 
     image_path = Path(image_dir) / f"{image_id}.jpg"
-    if not image_path.exists():
+    if not _path_exists_safely(image_path):
         return None
 
-    with Image.open(image_path) as image:
-        loaded_image = image.convert("RGB")
+    try:
+        with Image.open(image_path) as image:
+            loaded_image = image.convert("RGB")
+    except OSError:
+        return None
 
     image_cache[image_id] = loaded_image
     return loaded_image

@@ -18,6 +18,14 @@ import torch
 from torch.utils.data import Dataset
 
 
+def _path_exists_safely(path: Path) -> bool:
+    """Return False when the filesystem raises OSError during existence checks."""
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
 class BaseVGDataset(Dataset, ABC):
     """
     Abstract base dataset cho Visual Genome.
@@ -75,13 +83,19 @@ class BaseVGDataset(Dataset, ABC):
             return self._image_cache[image_id]
 
         img_path = self.image_dir / f"{image_id}.jpg"
-        if not img_path.exists():
+        if not _path_exists_safely(img_path):
             raise FileNotFoundError(
                 f"Không tìm thấy ảnh: {img_path}. "
                 f"Hãy chạy notebook notebooks/complete_pipeline.ipynb hoặc đảm bảo ảnh đã được tải về."
             )
 
-        image = Image.open(img_path).convert("RGB")
+        try:
+            image = Image.open(img_path).convert("RGB")
+        except OSError as exc:
+            raise FileNotFoundError(
+                f"Không đọc được ảnh: {img_path}. "
+                f"Hãy kiểm tra lại trạng thái mount của Google Drive hoặc tải lại file bị lỗi."
+            ) from exc
 
         if self.cache_images:
             self._image_cache[image_id] = image
@@ -172,12 +186,18 @@ def load_vocab(vocab_path: str) -> Dict[str, int]:
     Returns:
         Dict mapping label_string -> int index
     """
-    with open(vocab_path, "r", encoding="utf-8") as f:
-        vocab = json.load(f)
+    try:
+        with open(vocab_path, "r", encoding="utf-8") as f:
+            vocab = json.load(f)
+    except OSError as exc:
+        raise FileNotFoundError(f"Không đọc được vocab: {vocab_path}") from exc
     return vocab
 
 
 def load_json(json_path: str) -> any:
     """Load JSON file."""
-    with open(json_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except OSError as exc:
+        raise FileNotFoundError(f"Không đọc được JSON: {json_path}") from exc
