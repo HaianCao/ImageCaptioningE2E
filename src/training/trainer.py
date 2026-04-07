@@ -10,6 +10,8 @@ Provides common training functionality:
 - Logging
 """
 
+from contextlib import nullcontext
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -262,7 +264,9 @@ class BaseTrainer(ABC):
         all_preds = []
         all_targets = []
 
-        with torch.no_grad():
+        amp_context = torch.amp.autocast(device_type="cuda") if self.use_amp else nullcontext()
+
+        with torch.no_grad(), amp_context:
             val_loader = self._progress(
                 self.val_loader,
                 desc=f"Epoch {self.current_epoch + 1}/{self.max_epochs} [val]",

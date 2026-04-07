@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -249,7 +250,9 @@ def _evaluate_object_model(model: ObjectClassifier, loader: DataLoader, device: 
     logits_list: List[torch.Tensor] = []
     targets_list: List[torch.Tensor] = []
 
-    with torch.no_grad():
+    amp_context = torch.amp.autocast(device_type="cuda") if str(device).startswith("cuda") else nullcontext()
+
+    with torch.no_grad(), amp_context:
         for batch in loader:
             batch = _move_batch_to_device(batch, device)
             features = batch.get("feature")
@@ -286,7 +289,9 @@ def _evaluate_attribute_model(
     logits_list: List[torch.Tensor] = []
     targets_list: List[torch.Tensor] = []
 
-    with torch.no_grad():
+    amp_context = torch.amp.autocast(device_type="cuda") if str(device).startswith("cuda") else nullcontext()
+
+    with torch.no_grad(), amp_context:
         for batch in loader:
             batch = _move_batch_to_device(batch, device)
             features = batch.get("feature")
@@ -322,7 +327,9 @@ def _evaluate_relation_model(model: RelationClassifier, loader: DataLoader, devi
     logits_list: List[torch.Tensor] = []
     targets_list: List[torch.Tensor] = []
 
-    with torch.no_grad():
+    amp_context = torch.amp.autocast(device_type="cuda") if str(device).startswith("cuda") else nullcontext()
+
+    with torch.no_grad(), amp_context:
         for batch in loader:
             batch = _move_batch_to_device(batch, device)
             features = batch.get("feature")
