@@ -10,6 +10,7 @@ Tất cả backbone đều trả về feature vector 1D sau pooling.
 """
 
 from typing import Tuple
+import warnings
 import torch
 import torch.nn as nn
 from torchvision import models
@@ -22,8 +23,8 @@ TORCHVISION_BACKBONES = {
 TIMM_BACKBONE_ALIASES = {
     "efficientnet_b3": "efficientnet_b3",
     "efficientnet_b5": "efficientnet_b5",
-    "efficientnetv2_s": "efficientnetv2_s",
-    "efficientnetv2_m": "efficientnetv2_m",
+    "efficientnetv2_s": "tf_efficientnetv2_s",
+    "efficientnetv2_m": "tf_efficientnetv2_m",
     "convnext_tiny": "convnext_tiny",
     "convnext_small": "convnext_small",
     "convnextv2_tiny": "convnextv2_tiny",
@@ -67,7 +68,17 @@ class VisualEncoder(nn.Module):
         import timm
 
         timm_name = TIMM_BACKBONE_ALIASES.get(backbone_name, backbone_name)
-        model = timm.create_model(timm_name, pretrained=pretrained, num_classes=0, global_pool="avg")
+        try:
+            model = timm.create_model(timm_name, pretrained=pretrained, num_classes=0, global_pool="avg")
+        except RuntimeError as exc:
+            if pretrained and "No pretrained weights exist for" in str(exc):
+                warnings.warn(
+                    f"Pretrained weights are unavailable for '{timm_name}'. Falling back to random init.",
+                    RuntimeWarning,
+                )
+                model = timm.create_model(timm_name, pretrained=False, num_classes=0, global_pool="avg")
+            else:
+                raise
 
         feature_dim = getattr(model, "num_features", None)
         if feature_dim is None and hasattr(model, "feature_info") and hasattr(model.feature_info, "channels"):
