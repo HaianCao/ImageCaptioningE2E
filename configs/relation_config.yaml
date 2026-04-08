@@ -91,7 +91,7 @@ loss:
 training:
   # Batch size used by relation DataLoaders.
   # Increase it if your GPU memory allows; reduce it for smaller cards.
-  batch_size: 2500
+  batch_size: 2000
   # Number of DataLoader workers for relation training.
   num_workers: 0
   # Pin host memory only when CUDA is available.
