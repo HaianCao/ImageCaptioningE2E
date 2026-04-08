@@ -57,7 +57,7 @@ model:
   # - convnextv2_tiny -> modern_cnn
   # - swin_tiny_patch4_window7_224 -> transformer
   # The registry is extensible, so custom strategy names can be registered later.
-  strategy: "modern_cnn"
+  strategy: "efficientnetv2_s"
   # Hidden width of the object classification MLP head.
   object_hidden_dim: 1024
   # Dropout rate used inside the object head.
